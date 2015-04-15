@@ -7,7 +7,12 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <time.h>
-//#include <sys/uio.h>
+#include <stdlib.h>
+#include <arpa/inet.h>
+#include <stdio.h>
+#include <fcntl.h>
+
+#include "flow.h"
 
 #define V_GW "0.0.0.0"
 #define PORT 50000   // The port on which to send data
@@ -17,6 +22,7 @@
 void sendUDPDatagram(void);
 void listenGatewayRequest(void);
 void notifyAttacker(void);
+void handle_victim_gw_request(int, struct in_addr);
 
 /* Send a UDP Datagram */
 void sendUDPDatagram() {
@@ -33,18 +39,18 @@ void sendUDPDatagram() {
 	char content[64];
 	
 	if (err != 0) {
-		die("failed to resolve remote socket address (err=%d)", err);
+		//die("failed to resolve remote socket address (err=%d)", err);
 	}
 	
 	int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 	if (fd == -1) {
-		die("%s", strerror(errno));
+		//die("%s", strerror(errno));
 	}
 	
 	// nonce1 = hash(V_GW);
 	// content = "undesired_flow" + "1000100010001000" // nonce1
 	if (sendto(fd, content, sizeof(content), 0, res->ai_addr, res->ai_addrlen) == -1) {
-		die("UDP_e: %s", strerror(errno));
+		//die("UDP_e: %s", strerror(errno));
 	}
 }
 
@@ -58,12 +64,12 @@ void listenGatewayRequest() {
     double elapsedT;
     
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-		perror("Socket");
+		perror("Socket\n");
 		exit(1);
 	}
 	
 	if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &true, sizeof(int)) == -1) {
-		perror("Setsockopt");
+		perror("Setsockopt\n");
 		exit(1);
 	}
 	
@@ -72,67 +78,62 @@ void listenGatewayRequest() {
 	server_addr.sin_addr.s_addr = INADDR_ANY;
 	bzero(&(server_addr.sin_zero), 8);
 	
+	// Bind Socket
 	if (bind(sock, (struct sockaddr *)&server_addr, sizeof(struct sockaddr)) == -1) {
-		perror("Unable to bind");
+		perror("Unable to bind\n");
 		exit(1);
 	}
 	
-	if (listen(sock, 5) == -1) {
-		perror("Listen");
+	// Listen to Socket
+	if (listen(sock, 10) == -1) {
+		perror("Listen\n");
 		exit(1);
 	}
 	
-	printf("\nTCPServer Waiting for client on port 50000");
+	printf("Listening on port 50000\n");
 	fflush(stdout);
 	
 	while (1) {
 		sin_size = sizeof(struct sockaddr_in);
-		connected = accept(sock, (struct sockaddr *)&client_addr, &sin_size);
-		printf("\n I got a connection from (%s , %d)",
-			inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
 		
-		/* Respond to packet from Victim's gateway containing undesired flow
-		 * with UDP datagram containing nonce1 for some T seconds
-		 */
-		start = clock();
 		while (1) {
-			end = clock();
-			elapsedTime = (double)(end - start) / CLOCKS_PER_SEC;
-			if (elapsedTime < T_V)
-				sendUDPDatagram();
-			else
-				break;
-				
 			
-		}
-		
-		
-		
-		/* Other stuff */
-		while (1) {
-			printf("\n SEND (q or Q to quit) : ");
-			gets(send_data);
-			if (strcmp(send_data , "q") == 0 || strcmp(send_data , "Q") == 0) {
-				send(connected, send_data,strlen(send_data), 0);
-				close(connected);
-				break;
+			// Accept Connection
+			connected = accept(sock, (struct sockaddr*) &client_addr, &sin_size);
+			if (connected < 0) {
+				printf("ERROR on accept\n");
 			}
-			else
-				send(connected, send_data, strlen(send_data), 0);
+			else {
+				printf("---------connected to a victim gateway-------------\n");
+
+				printf("%s\n", inet_ntoa((struct in_addr)client_addr.sin_addr));
 				
-			bytes_recieved = recv(connected, recv_data, 1024, 0);
-			recv_data[bytes_recieved] = '\0';
-			if (strcmp(recv_data , "q") == 0 || strcmp(recv_data , "Q") == 0) {
-				close(connected);
-				break;
+				pid_t process_id;
+				process_id = fork();
+				if (process_id == 0) { //child process
+					// Read & Write
+					handle_victim_gw_request(connected, client_addr.sin_addr);
+					_Exit(0);
+				}
+				else { //parent_process
+					
+				}
 			}
-			else
-				printf("\n RECIEVED DATA = %s " , recv_data);
-			fflush(stdout);
 		}
-	
-		close(sock);
-		sleep(1);
 	}
 }
 
+/* Send TCP Message to Victim GW with nonce2 */
+void handle_victim_gw_request(int sockfd, struct in_addr victim_gw_addr) {
+	struct flow flow;
+	read(sockfd, &flow, sizeof(flow));
+	char *msg;
+	
+	write(sockfd, msg, sizeof(msg));
+	close(sockfd);
+}
+
+int main() {
+	listenGatewayRequest();
+	return 0;
+}
