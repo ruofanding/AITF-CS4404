@@ -111,12 +111,12 @@ void listenGatewayRequest() {
 				pid_t process_id;
 				process_id = fork();
 				if (process_id == 0) { //child process
-					// Read & Write
-					handle_victim_gw_request(connected, client_addr.sin_addr);
+					// Send UDP Packets
+					sendUDPDatagram();
 					_Exit(0);
 				}
 				else { //parent_process
-					
+					handle_victim_gw_request(connected, client_addr.sin_addr);
 				}
 			}
 		}
@@ -128,8 +128,30 @@ void handle_victim_gw_request(int sockfd, struct in_addr victim_gw_addr) {
 	struct flow flow;
 	read(sockfd, &flow, sizeof(flow));
 	char *msg;
+	 
+	/* Check nonce1 value (2nd line of content) */
+	if (received_nonce1 == actual_nonce1) {
+		/* Check R value for Attacker GW (check RR shim) */
+		if (received_RR == actual_RR) {
+			//msg = nonce2
+			write(sockfd, msg, sizeof(msg));
+			
+			/* Tell Attacker to stop sending traffic to flow */
+			notifyAttacker();
+			
+			/* Store filter in TCAM (filter table)*/
+			
+			
+			/* Send packet with nonce2 */
+			
+		}
+		/* Incorrect RR */
+		else {
+			/* Send packet with correct RR and nonce2 */
+			
+		}
+	}
 	
-	write(sockfd, msg, sizeof(msg));
 	close(sockfd);
 }
 
