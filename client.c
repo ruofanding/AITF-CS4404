@@ -9,7 +9,7 @@
 #include<sys/socket.h>
 #include <unistd.h>
 
-#define SERVER "127.0.0.1"
+#define SERVER "64.233.185.113"
 #define BUFLEN 512  //Max length of buffer
 #define PORT 8080   //The port on which to send data
  
@@ -49,8 +49,7 @@ int main(void)
 	  die("sendto()");
 
         }else{
-	printf("one datagram sent\n");
-	sleep(1);
+
       }
       
     }
