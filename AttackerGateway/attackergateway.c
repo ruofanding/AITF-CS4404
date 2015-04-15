@@ -14,9 +14,10 @@
 
 #include "flow.h"
 
-#define V_GW "0.0.0.0"
-#define PORT 50000   // The port on which to send data
-#define T_V 1        // Period UDP datagrams will be sent
+#define TCP_PORT 50000   // The port on which to send data
+#define UDP_PORT 50002   // The arbitrary port to send UDP datagrams
+#define NONCE_SIZE 64
+#define R_SIZE 64
 
 /* Prototypes */
 void sendUDPDatagram(void);
@@ -24,34 +25,30 @@ void listenGatewayRequest(void);
 void notifyAttacker(void);
 void handle_victim_gw_request(int, struct in_addr);
 
-/* Send a UDP Datagram */
-void sendUDPDatagram() {
-	const char *hostname = 0; /* localhost */
-	const char *portname = "daytime";
-	struct addrinfo hints;
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_UNSPEC;
-	hints.ai_socktype = SOCK_DGRAM;
-	hints.ai_protocol = IPPROTO_UDP;
-	hints.ai_flags = AI_ADDRCONFIG;
-	struct addrinfo *res = 0;
-	int err = getaddrinfo(hostname, portname, &hints, &res);
-	char content[64];
-	
-	if (err != 0) {
-		//die("failed to resolve remote socket address (err=%d)", err);
+/* Send UDP Datagrams */
+void sendUDPDatagram(char *victim_addr) {
+	    struct sockaddr_in si_me, si_other;
+    21    int s, i, slen=sizeof(si_other);
+    22    char buf[BUFLEN];
+    23
+    24    if ((s=socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP))==-1)
+    25      diep("socket");
+    26
+    27    memset((char *) &si_me, 0, sizeof(si_me));
+    28    si_me.sin_family = AF_INET;
+    29    si_me.sin_port = htons(PORT);
+    30    si_me.sin_addr.s_addr = htonl(INADDR_ANY);
+    31    if (bind(s, &si_me, sizeof(si_me))==-1)
+    32        diep("bind");
+    33
+    34    for (i=0; i<NPACK; i++) {
+    35      if (recvfrom(s, buf, BUFLEN, 0, &si_other, &slen)==-1)
+    36        diep("recvfrom()");
+		printf("Received packet from %s:%d\nData: %s\n\n", 
+		inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port), buf);
 	}
-	
-	int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-	if (fd == -1) {
-		//die("%s", strerror(errno));
-	}
-	
-	// nonce1 = hash(V_GW);
-	// content = "undesired_flow" + "1000100010001000" // nonce1
-	if (sendto(fd, content, sizeof(content), 0, res->ai_addr, res->ai_addrlen) == -1) {
-		//die("UDP_e: %s", strerror(errno));
-	}
+	close(s);
+	return 0;
 }
 
 /* Listens and Connects to Victim Gateway */
@@ -74,7 +71,7 @@ void listenGatewayRequest() {
 	}
 	
 	server_addr.sin_family = AF_INET;
-	server_addr.sin_port = htons(PORT);
+	server_addr.sin_port = htons(TCP_PORT);
 	server_addr.sin_addr.s_addr = INADDR_ANY;
 	bzero(&(server_addr.sin_zero), 8);
 	
@@ -111,7 +108,7 @@ void listenGatewayRequest() {
 				pid_t process_id;
 				process_id = fork();
 				if (process_id == 0) { //child process
-					// Send UDP Packets
+					// Send UDP Datagrams
 					sendUDPDatagram();
 					_Exit(0);
 				}
