@@ -17,9 +17,7 @@
 #define DEVICE "eth2"
 #define PACKET_SIZE 65536
 
-main ( int argc, char *argv[] )
-{
-  char* device = "eth2";
+int set_up_raw_socket(char* device){
   int raw_sock;
 
   // create a socket
@@ -40,8 +38,6 @@ main ( int argc, char *argv[] )
       printf("Error getting Interface %s index !\n", device); 
       exit(-1);
     } 
-  
-  
   /* Bind our raw socket to this interface */
   sll.sll_family = AF_PACKET;
   sll.sll_ifindex = ifr.ifr_ifindex;
@@ -50,26 +46,18 @@ main ( int argc, char *argv[] )
     perror("Error binding raw socket to interface\n");
     exit(-1);
   }
-  
+  return raw_sock;
+}
+
+void read_packet(int raw_sock, void (*process_func)(void*, size_t)){
   unsigned char pkt[PACKET_SIZE];
-  struct in_addr dest_addr;
-  struct in_addr src_addr;
   struct sockaddr_in receiver;
-  struct iphdr ip_header;
-  
   socklen_t len = sizeof(receiver);
-  int i = 0;
+
   size_t size;
   while(1){
     size = recvfrom(raw_sock, pkt, PACKET_SIZE, 0, &receiver, &len);
     //Ethernet II has 14 bytes MAC header!
-    struct iphdr *iph = (struct iphdr*) (pkt + 14); 
-    dest_addr.s_addr = iph->daddr;
-    src_addr.s_addr = iph->saddr;
-
-    printf("Size: %d\n", size);
-    printf("From:%s\n", inet_ntoa(src_addr));
-    printf("To  :%s\n\n", inet_ntoa(dest_addr));
+    (*process_func)((void*)(pkt + 14), size); 
   }
-  return 0;
 }
