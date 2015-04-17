@@ -6,8 +6,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
-
+#include <pthread.h>
 #include "flow.h"
+#include "sniff.h"
 
 #define BUFFER_SIZE 2056
 #define NAME_SIZE 256
@@ -39,12 +40,20 @@ void send_filter_request(){
   close(sock_fd);
 }
 
-void handle_victim_request(int sockfd, struct in_addr victim_addr){
+typedef struct{
+  int sockfd;
+  struct in_addr victim_addr;
+}HandlerData;
+
+void* handle_victim_request(void* data){
+  HandlerData* passed_data = (HandlerData*) data;
+  int sockfd = passed_data->sockfd;
+
   struct flow flow;
   read(sockfd, &flow, sizeof(flow));
   char *msg;
 
-  if(memcmp(&flow.src_addr, &victim_addr, sizeof(struct in_addr)) != 0){
+  if(memcmp(&flow.src_addr, &passed_data->victim_addr, sizeof(struct in_addr)) != 0){
     printf("Victim request's destination IP doesn't match victim's IP address\n");
     msg = "Fake IP!\n";
   }else{
@@ -53,6 +62,7 @@ void handle_victim_request(int sockfd, struct in_addr victim_addr){
   }
   write(sockfd, msg, sizeof(msg));
   close(sockfd);
+  free(passed_data);
 }
 
 void listen_victim(){
@@ -102,14 +112,12 @@ void listen_victim(){
       printf("---------connect to a new victim-------------\n");
 
       printf("%s\n", inet_ntoa((struct in_addr)victim_addr.sin_addr));
-      pid_t process_id;
-      process_id = fork();
-      if(process_id == 0){ //child process
-	handle_victim_request(newsockfd, victim_addr.sin_addr);
-	_Exit(0);
-      }else{ //parent_process
-	
-      }
+      HandlerData* data = malloc(sizeof(HandlerData));
+      data->sockfd = newsockfd;
+      memcpy(&data->victim_addr, &victim_addr.sin_addr, sizeof(struct in_addr));
+      pthread_t pid;
+      pthread_create(&pid, NULL, handle_victim_request, data);  
+
     }
   }  
 }
