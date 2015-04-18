@@ -7,6 +7,7 @@
 #include <string.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <sys/signal.h>
 #include "flow.h"
 #include "sniff.h"
 
@@ -48,7 +49,7 @@ typedef struct{
 void* handle_victim_request(void* data){
   HandlerData* passed_data = (HandlerData*) data;
   int sockfd = passed_data->sockfd;
-
+  
   struct flow flow;
   read(sockfd, &flow, sizeof(flow));
   char *msg;
@@ -63,6 +64,33 @@ void* handle_victim_request(void* data){
   write(sockfd, msg, sizeof(msg));
   close(sockfd);
   free(passed_data);
+  
+  int sniff_rule_index = getEmptySpot();
+  /*
+  if(sniff_rule_index == -1){
+    perror("No sniff space left\n");
+    exit(1);
+    }*/
+  memcpy(&sniff_rule_array[sniff_rule_index].src_addr, &flow.src_addr, sizeof(struct in_addr));
+  sniff_rule_array[sniff_rule_index].requester = pthread_self();
+  int rc = sleep(50);
+  printf("Thread ends at %d\n", rc);
+  fflush(stdout);
+}
+
+void signal_handler(int signo){
+
+}
+
+void set_up_sig_handler(){
+  struct sigaction actions;
+  
+  memset(&actions, 0, sizeof(actions));
+  sigemptyset(&actions.sa_mask);
+  actions.sa_flags = 0;
+  actions.sa_handler = signal_handler;
+  
+  sigaction(SIGALRM,&actions,NULL);
 }
 
 void listen_victim(){
@@ -101,6 +129,9 @@ void listen_victim(){
   int newsockfd;
   struct sockaddr_in victim_addr;
   socklen_t addr_len;
+
+
+ 
     
   while(1){
     // Do the accept
@@ -117,13 +148,16 @@ void listen_victim(){
       memcpy(&data->victim_addr, &victim_addr.sin_addr, sizeof(struct in_addr));
       pthread_t pid;
       pthread_create(&pid, NULL, handle_victim_request, data);  
-
+      printf("One requester, %li\n", (unsigned long int) pid);
+      fflush(stdout);
     }
   }  
 }
 
 int main ( int argc, char *argv[] )
 {
+  set_up_sniff_thread();
+  set_up_sig_handler();
   listen_victim();
   return 0;
 }
