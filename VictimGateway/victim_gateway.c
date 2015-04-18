@@ -17,7 +17,17 @@
 #define VICTIM_GATEWAY_PORT 50001
 #define ATTACKER_GATEWAY_IP_ADDRESS "192.168.1.1"
 
-void send_filter_request(){
+void sniff_udp_packet(struct flow* flow_pt){
+  int sniff_rule_index = get_sniff_rule_spot();
+  memcpy(&sniff_rule_array[sniff_rule_index].src_addr, &flow_pt->src_addr, 
+	 sizeof(struct in_addr));
+  sniff_rule_array[sniff_rule_index].requester = pthread_self();
+  int rc = usleep();
+  free_sniff_rule_spot(sniff_rule_index);
+  printf("Thread ends at %d\n", rc); 
+}
+
+int send_filter_request(struct flow* flow_pt){
   struct sockaddr_in attacker_gw_addr;
   int sock_fd;
   
@@ -25,7 +35,7 @@ void send_filter_request(){
   sock_fd = socket(AF_INET, SOCK_STREAM, 0);
   if (sock_fd < 0)   {
     printf("socket setup error");
-    return;
+    return 1;
   }
   
   // set up the sockaddr_in structure.  
@@ -33,12 +43,15 @@ void send_filter_request(){
   attacker_gw_addr.sin_port = htons(ATTACKER_GATEWAY_PORT);
   inet_aton(ATTACKER_GATEWAY_IP_ADDRESS, &attacker_gw_addr.sin_addr);
   
-  if (connect(sock_fd, (struct sockaddr *) &attacker_gw_addr, sizeof(attacker_gw_addr)) < 0)  {
+  if (connect(sock_fd, (struct sockaddr *) &attacker_gw_addr, 
+	      sizeof(attacker_gw_addr)) < 0)  {
     printf("socket connection fail");
-    return;
+    return 1;
   }
-  //  write(sock_fd, H_END, strlen(H_END));
+  write(sock_fd, flow_pt, sizeof(struct flow));
+  
   close(sock_fd);
+  return 0;
 }
 
 typedef struct{
@@ -54,27 +67,19 @@ void* handle_victim_request(void* data){
   read(sockfd, &flow, sizeof(flow));
   char *msg;
 
-  if(memcmp(&flow.src_addr, &passed_data->victim_addr, sizeof(struct in_addr)) != 0){
+  if(memcmp(&flow.src_addr, &passed_data->victim_addr, 
+	    sizeof(struct in_addr)) != 0){
     printf("Victim request's destination IP doesn't match victim's IP address\n");
     msg = "Fake IP!\n";
+    write(sockfd, msg, sizeof(msg));
   }else{
     printf("Reqeust from: %s\n", inet_ntoa(flow.src_addr));
     msg = "OK\n";
+    write(sockfd, msg, sizeof(msg));
   }
-  write(sockfd, msg, sizeof(msg));
   close(sockfd);
   free(passed_data);
   
-  int sniff_rule_index = getEmptySpot();
-  /*
-  if(sniff_rule_index == -1){
-    perror("No sniff space left\n");
-    exit(1);
-    }*/
-  memcpy(&sniff_rule_array[sniff_rule_index].src_addr, &flow.src_addr, sizeof(struct in_addr));
-  sniff_rule_array[sniff_rule_index].requester = pthread_self();
-  int rc = sleep(50);
-  printf("Thread ends at %d\n", rc);
   fflush(stdout);
 }
 
@@ -109,7 +114,8 @@ void listen_victim(){
   server_addr.sin_family = AF_INET;
   server_addr.sin_addr.s_addr = INADDR_ANY; 
   server_addr.sin_port = htons((int) VICTIM_GATEWAY_PORT);
-  if(bind(serverfd, (struct sockaddr *) &server_addr, sizeof(server_addr)) != 0 ){
+  if(bind(serverfd, (struct sockaddr *) &server_addr, 
+	  sizeof(server_addr)) != 0 ){
     printf("Bind error.\n");
     fflush(stdout);
     exit(1);

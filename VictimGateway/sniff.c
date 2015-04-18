@@ -22,8 +22,14 @@
 
 
 SniffRule sniff_rule_array[SNIFF_RULE_SIZE];
-int sniff_rule_number;
+int sniff_rule_used[SNIFF_RULE_SIZE];
 
+int sniff_rule_number;
+pthread_mutex_t sniff_lock;
+
+int compareAddr(struct in_addr* a1, struct in_addr* a2){
+  return memcmp(a1, a2, sizeof(struct in_addr));
+}
 
 int set_up_raw_socket(char* device){
   int raw_sock;
@@ -85,16 +91,12 @@ void print_packet(void* pkt, size_t size){
   printf("From:%s\n", inet_ntoa(src_addr));
   printf("To  :%s\n\n", inet_ntoa(dest_addr));  
   */
-  int counter = 0;
   int i;
 
   printf("\t\t\t%d\n", sniff_rule_number);
   for(i = 0; i < sniff_rule_number; i++){
-    //    printf("%s, rule:%s\n", inet_ntoa(src_addr), inet_ntoa(sniff->src_addr));
-    
-    if(memcmp(&src_addr, &sniff_rule_array[i].src_addr,sizeof(struct in_addr)) == 0){
-      //&& memcpy(&dest_addr, &sniff->dest_addr, sizeof(struct in_addr))){
-      //notify thread.
+    if(!compareAddr(&src_addr, &sniff_rule_array[i].src_addr)
+       && !compareAddr(&dest_addr, &sniff_rule_array[i].dest_addr)){
       printf("One match, %li\n", (unsigned long int) sniff_rule_array[i].requester);
       pthread_kill(sniff_rule_array[i].requester, SIGALRM);
     }
@@ -109,10 +111,31 @@ void* start_sniff(void* device){
 
 pthread_t set_up_sniff_thread(){
   pthread_t sniff_id;      
+
+  pthread_mutex_init(&sniff_lock, NULL);
   pthread_create(&sniff_id, NULL, start_sniff, "eth2");
   return sniff_id;
 }
 
-int getEmptySpot(){
-  return sniff_rule_number++;
+int get_sniff_rule_spot(){
+  int i;
+  int result = -1;
+  pthread_mutex_lock(&sniff_lock);
+  for(i = 0; i < SNIFF_RULE_SIZE;i++){
+    if(!sniff_rule_used[i]){
+      sniff_rule_used[i] = 1;
+      sniff_rule_number++;
+      result = -1;
+      break;
+    }
+  }
+  pthread_mutex_unlock(&sniff_lock);
+  return result;
+}
+
+void free_sniff_rule_spot(int index){
+  pthread_mutex_lock(&sniff_lock);
+  sniff_rule_number --;
+  sniff_rule_used[index] = 0;
+  pthread_mutex_unlock(&sniff_lock);
 }
