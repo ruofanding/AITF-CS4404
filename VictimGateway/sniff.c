@@ -14,24 +14,99 @@
 #include <net/ethernet.h> 
 
 #include <netinet/ip.h>
+#include <netinet/udp.h>
+
 #include "sniff.h"
 #include <sys/signal.h>
 
 #define DEVICE "eth2"
 #define PACKET_SIZE 65536
 
+//============================Start of Intercept=======================
+#ifdef INTERCEPT
+InterceptRule intercept_rule_array[INTERCEPT_RULE_SIZE];
+int intercept_rule_used[INTERCEPT_RULE_SIZE];
+int intercept_rule_number;
+pthread_mutex_t intercept_lock;
 
-SniffRule sniff_rule_array[SNIFF_RULE_SIZE];
-int sniff_rule_used[SNIFF_RULE_SIZE];
+void intercept_packet_set_up()
+{
+  memset(intercept_rule_used, 0, sizeof(intercept_rule_used));
+  pthread_mutex_init(&intercept_lock, NULL);
+}
 
-int sniff_rule_number;
-pthread_mutex_t sniff_lock;
+void intercept_packet(void* pkt)
+{
+  struct in_addr dest_addr;
+  struct in_addr src_addr;
+  struct iphdr ip_header;
+  
+  struct iphdr *iph = (struct iphdr*)pkt; 
+  dest_addr.s_addr = iph->daddr;
+  src_addr.s_addr = iph->saddr;
 
-int compareAddr(struct in_addr* a1, struct in_addr* a2){
+  int i = 0;
+  int counter = 0;
+  for(counter = 0, i = 0; counter < intercept_rule_number; counter++, i++){
+    while(!intercept_rule_used[i]){
+      i++;
+    }
+    
+    //    if(!compareAddr(&src_addr, &intercept_rule_array[i].src_addr)
+    //   && !compareAddr(&dest_addr, &intercept_rule_array[i].dest_addr)){
+    
+    if(!compareAddr(&src_addr, &intercept_rule_array[i].src_addr)){
+      struct udphdr *udph = (struct udphdr *)((void *) iph + sizeof(struct iphdr));
+      char* msg = (char*)((void*)udph + sizeof(struct udphdr));
+      uint16_t size = ntohs(udph->len);
+      int msg_size = size - sizeof(struct udphdr);
+      if(msg_size != 4){
+	break;
+      }
+      memcpy(&intercept_rule_array[i].nonce, msg, sizeof(intercept_rule_array[i].nonce));
+      printf("One match, %li\n", (unsigned long int) intercept_rule_array[i].requester);
+      fflush(stdout);
+      pthread_kill(intercept_rule_array[i].requester, SIGALRM);
+    }
+  }
+}
+
+
+int get_intercept_rule_spot()
+{
+  int i;
+  int result = -1;
+  pthread_mutex_lock(&intercept_lock);
+  for(i = 0; i < INTERCEPT_RULE_SIZE;i++){
+    if(!intercept_rule_used[i]){
+      intercept_rule_used[i] = 1;
+      intercept_rule_number++;
+      result = i;
+      break;
+    }
+  }
+  pthread_mutex_unlock(&intercept_lock);
+  return result;
+}
+
+
+void free_intercept_rule_spot(int index)
+{
+  pthread_mutex_lock(&intercept_lock);
+  intercept_rule_number --;
+  intercept_rule_used[index] = 0;
+  pthread_mutex_unlock(&intercept_lock);
+}
+#endif
+//============================End of Intercept=======================
+
+int compareAddr(struct in_addr* a1, struct in_addr* a2)
+{
   return memcmp(a1, a2, sizeof(struct in_addr));
 }
 
-int set_up_raw_socket(char* device){
+int set_up_raw_socket(char* device)
+{
   int raw_sock;
 
   // create a socket
@@ -63,7 +138,8 @@ int set_up_raw_socket(char* device){
   return raw_sock;
 }
 
-void read_packet(int raw_sock, void (*process_func)(void*, size_t)){
+void read_packet(int raw_sock, void (*process_func)(void*, size_t))
+{
   unsigned char pkt[PACKET_SIZE];
   struct sockaddr_in receiver;
   socklen_t len = sizeof(receiver);
@@ -78,7 +154,8 @@ void read_packet(int raw_sock, void (*process_func)(void*, size_t)){
   }
 }
 
-void print_packet(void* pkt, size_t size){
+void print_packet(void* pkt, size_t size)
+{
   struct in_addr dest_addr;
   struct in_addr src_addr;
   struct iphdr ip_header;
@@ -86,56 +163,31 @@ void print_packet(void* pkt, size_t size){
   struct iphdr *iph = (struct iphdr*)pkt; 
   dest_addr.s_addr = iph->daddr;
   src_addr.s_addr = iph->saddr;
-  /*
+
+  printf("New packet\n");
   printf("Size: %zu\n", size);
   printf("From:%s\n", inet_ntoa(src_addr));
-  printf("To  :%s\n\n", inet_ntoa(dest_addr));  
-  */
-  int i;
-
-  printf("\t\t\t%d\n", sniff_rule_number);
-  for(i = 0; i < sniff_rule_number; i++){
-    if(!compareAddr(&src_addr, &sniff_rule_array[i].src_addr)
-       && !compareAddr(&dest_addr, &sniff_rule_array[i].dest_addr)){
-      printf("One match, %li\n", (unsigned long int) sniff_rule_array[i].requester);
-      pthread_kill(sniff_rule_array[i].requester, SIGALRM);
-    }
-  }
+  printf("To  :%s\n\n", inet_ntoa(dest_addr)); 
 }
 
+void process_pkt(void* pkt, size_t size)
+{
+  intercept_packet(pkt);
+}
 
-void* start_sniff(void* device){
+void* start_sniff(void* device)
+{
   int sock_fd = set_up_raw_socket((char*)device);
-  read_packet(sock_fd, print_packet);
+  read_packet(sock_fd, process_pkt);
 }
 
-pthread_t set_up_sniff_thread(){
-  pthread_t sniff_id;      
 
-  pthread_mutex_init(&sniff_lock, NULL);
+pthread_t set_up_sniff_thread()
+{
+  intercept_packet_set_up();
+
+  pthread_t sniff_id;      
   pthread_create(&sniff_id, NULL, start_sniff, "eth2");
   return sniff_id;
 }
 
-int get_sniff_rule_spot(){
-  int i;
-  int result = -1;
-  pthread_mutex_lock(&sniff_lock);
-  for(i = 0; i < SNIFF_RULE_SIZE;i++){
-    if(!sniff_rule_used[i]){
-      sniff_rule_used[i] = 1;
-      sniff_rule_number++;
-      result = -1;
-      break;
-    }
-  }
-  pthread_mutex_unlock(&sniff_lock);
-  return result;
-}
-
-void free_sniff_rule_spot(int index){
-  pthread_mutex_lock(&sniff_lock);
-  sniff_rule_number --;
-  sniff_rule_used[index] = 0;
-  pthread_mutex_unlock(&sniff_lock);
-}
