@@ -17,14 +17,26 @@
 #define VICTIM_GATEWAY_PORT 50001
 #define ATTACKER_GATEWAY_IP_ADDRESS "192.168.1.1"
 
-void sniff_udp_packet(struct flow* flow_pt){
-  int sniff_rule_index = get_sniff_rule_spot();
-  memcpy(&sniff_rule_array[sniff_rule_index].src_addr, &flow_pt->src_addr, 
+int intercept_udp_packet(struct flow* flow_pt){
+  int result;
+  int intercept_rule_index;
+
+  intercept_rule_index = get_intercept_rule_spot();
+  printf("Assign rule index %d\n", intercept_rule_index);
+  memcpy(&intercept_rule_array[intercept_rule_index].src_addr, &flow_pt->src_addr, 
 	 sizeof(struct in_addr));
-  sniff_rule_array[sniff_rule_index].requester = pthread_self();
-  int rc = usleep();
-  free_sniff_rule_spot(sniff_rule_index);
+  intercept_rule_array[intercept_rule_index].requester = pthread_self();
+
+  int rc = sleep(10);
+  if(rc != 0){ // Signaled by sniff thread before finish sleep;
+    result = intercept_rule_array[intercept_rule_index].nonce;
+  }else{       // Not signaled by sniff thread, so no udp packet catched 
+    result = 0;
+  }
+
+  free_intercept_rule_spot(intercept_rule_index);
   printf("Thread ends at %d\n", rc); 
+  return result;
 }
 
 int send_filter_request(struct flow* flow_pt){
@@ -65,8 +77,8 @@ void* handle_victim_request(void* data){
   
   struct flow flow;
   read(sockfd, &flow, sizeof(flow));
-  char *msg;
 
+  char *msg;
   if(memcmp(&flow.src_addr, &passed_data->victim_addr, 
 	    sizeof(struct in_addr)) != 0){
     printf("Victim request's destination IP doesn't match victim's IP address\n");
@@ -79,7 +91,9 @@ void* handle_victim_request(void* data){
   }
   close(sockfd);
   free(passed_data);
-  
+  int result;
+  result = intercept_udp_packet(&flow);
+  printf("Result: %d\n", result);
   fflush(stdout);
 }
 

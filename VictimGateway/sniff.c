@@ -17,10 +17,42 @@
 #include <netinet/udp.h>
 
 #include "sniff.h"
+#include "flow.h"
 #include <sys/signal.h>
 
 #define DEVICE "eth2"
 #define PACKET_SIZE 65536
+
+//============================Helper functions========================
+inline int equalAddr(struct in_addr* a1, struct in_addr* a2)
+{
+  return !memcmp(a1, a2, sizeof(struct in_addr));
+}
+
+int match_filter_rule(struct flow* rule, struct flow* flow, int ignore_src){
+  int i;
+
+  if(!equalAddr(&rule->dest_addr, &flow->dest_addr)){
+    return 0;
+  }
+  if(rule->number > flow->number){
+    return 0;
+  }
+  
+  for(i = 0; i < rule->number; i++){
+    if(!equalAddr(&(rule->route_record[i].addr), &(flow->route_record[i].addr))){
+      return 0;
+    }
+  }
+  
+  if(!ignore_src){
+    if(!equalAddr(&rule->dest_addr, &flow->dest_addr)){
+      return 0;
+    }
+  }
+  return 1;
+}
+
 
 //============================Start of Intercept=======================
 #ifdef INTERCEPT
@@ -52,10 +84,10 @@ void intercept_packet(void* pkt)
       i++;
     }
     
-    //    if(!compareAddr(&src_addr, &intercept_rule_array[i].src_addr)
-    //   && !compareAddr(&dest_addr, &intercept_rule_array[i].dest_addr)){
+    //    if(equalAddr(&src_addr, &intercept_rule_array[i].src_addr)
+    //   && equalAddr(&dest_addr, &intercept_rule_array[i].dest_addr)){
     
-    if(!compareAddr(&src_addr, &intercept_rule_array[i].src_addr)){
+    if(equalAddr(&src_addr, &intercept_rule_array[i].src_addr)){
       struct udphdr *udph = (struct udphdr *)((void *) iph + sizeof(struct iphdr));
       char* msg = (char*)((void*)udph + sizeof(struct udphdr));
       uint16_t size = ntohs(udph->len);
@@ -100,10 +132,71 @@ void free_intercept_rule_spot(int index)
 #endif
 //============================End of Intercept=======================
 
-int compareAddr(struct in_addr* a1, struct in_addr* a2)
+
+//============================Start of Filter=======================
+#ifdef FILTER
+FilterRule filter_rule_array[FILTER_RULE_SIZE];
+int filter_rule_used[FILTER_RULE_SIZE];
+int filter_rule_number;
+pthread_mutex_t filter_lock;
+
+void filter_packet_set_up()
 {
-  return memcmp(a1, a2, sizeof(struct in_addr));
+  memset(filter_rule_used, 0, sizeof(filter_rule_used));
+  pthread_mutex_init(&filter_lock, NULL);
 }
+
+int filter_packet(void* pkt)
+{
+  struct in_addr dest_addr;
+  struct in_addr src_addr;
+  struct iphdr ip_header;
+  
+  struct iphdr *iph = (struct iphdr*)pkt; 
+  dest_addr.s_addr = iph->daddr;
+  src_addr.s_addr = iph->saddr;
+
+  int i = 0;
+  int counter = 0;
+  for(counter = 0, i = 0; counter < filter_rule_number; counter++, i++){
+    while(!filter_rule_used[i]){
+      i++;
+    }    
+    if(match_filter_rule(&filter_rule_array[i].flow, NULL)){
+      //Filter out.
+    }
+  }
+}
+
+
+int get_filter_rule_spot()
+{
+  int i;
+  int result = -1;
+  pthread_mutex_lock(&filter_lock);
+  for(i = 0; i < FILTER_RULE_SIZE;i++){
+    if(!filter_rule_used[i]){
+      filter_rule_used[i] = 1;
+      filter_rule_number++;
+      result = i;
+      break;
+    }
+  }
+  pthread_mutex_unlock(&filter_lock);
+  return result;
+}
+
+
+void free_filter_rule_spot(int index)
+{
+  pthread_mutex_lock(&filter_lock);
+  filter_rule_number --;
+  filter_rule_used[index] = 0;
+  pthread_mutex_unlock(&filter_lock);
+}
+#endif
+//============================End of Filter=======================
+
 
 int set_up_raw_socket(char* device)
 {
