@@ -20,7 +20,6 @@
 #include "flow.h"
 #include <sys/signal.h>
 
-#define DEVICE "eth2"
 #define PACKET_SIZE 65536
 
 //============================Helper functions========================
@@ -83,6 +82,10 @@ void intercept_packet(void* pkt)
     while(!intercept_rule_used[i]){
       i++;
     }
+    printf("%d \n", i);
+    printf("packet:%s\n", inet_ntoa(src_addr));
+    printf("rule :%s\n\n", inet_ntoa(intercept_rule_array[i].src_addr));
+
     
     //    if(equalAddr(&src_addr, &intercept_rule_array[i].src_addr)
     //   && equalAddr(&dest_addr, &intercept_rule_array[i].dest_addr)){
@@ -261,11 +264,13 @@ void print_packet(void* pkt, size_t size)
   printf("Size: %zu\n", size);
   printf("From:%s\n", inet_ntoa(src_addr));
   printf("To  :%s\n\n", inet_ntoa(dest_addr)); 
+  fflush(stdout);
 }
 
 void process_pkt(void* pkt, size_t size)
 {
-  intercept_packet(pkt);
+  //intercept_packet(pkt);
+  print_packet(pkt, size);
 }
 
 void* start_sniff(void* device)
@@ -275,12 +280,12 @@ void* start_sniff(void* device)
 }
 
 
-pthread_t set_up_sniff_thread()
+pthread_t set_up_sniff_thread(char* device)
 {
   intercept_packet_set_up();
 
   pthread_t sniff_id;      
-  pthread_create(&sniff_id, NULL, start_sniff, "eth2");
+  pthread_create(&sniff_id, NULL, start_sniff, device);
   return sniff_id;
 }
 

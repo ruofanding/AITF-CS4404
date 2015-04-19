@@ -15,7 +15,7 @@
 #define NAME_SIZE 256
 #define ATTACKER_GATEWAY_PORT 50000
 #define VICTIM_GATEWAY_PORT 50001
-#define ATTACKER_GATEWAY_IP_ADDRESS "192.168.1.1"
+#define ATTACKER_GATEWAY_IP_ADDRESS "127.0.0.1"
 
 int intercept_udp_packet(struct flow* flow_pt){
   int result;
@@ -27,7 +27,7 @@ int intercept_udp_packet(struct flow* flow_pt){
 	 sizeof(struct in_addr));
   intercept_rule_array[intercept_rule_index].requester = pthread_self();
 
-  int rc = sleep(10);
+  int rc = sleep(1000);
   if(rc != 0){ // Signaled by sniff thread before finish sleep;
     result = intercept_rule_array[intercept_rule_index].nonce;
   }else{       // Not signaled by sniff thread, so no udp packet catched 
@@ -61,6 +61,10 @@ int send_filter_request(struct flow* flow_pt){
     return 1;
   }
   write(sock_fd, flow_pt, sizeof(struct flow));
+
+  int result;
+  result = intercept_udp_packet(flow_pt);
+  printf("Result: %d\n", result);
   
   close(sock_fd);
   return 0;
@@ -91,9 +95,7 @@ void* handle_victim_request(void* data){
   }
   close(sockfd);
   free(passed_data);
-  int result;
-  result = intercept_udp_packet(&flow);
-  printf("Result: %d\n", result);
+  send_filter_request(&flow);
   fflush(stdout);
 }
 
@@ -163,20 +165,21 @@ void listen_victim(){
       printf("---------connect to a new victim-------------\n");
 
       printf("%s\n", inet_ntoa((struct in_addr)victim_addr.sin_addr));
+      /*
       HandlerData* data = malloc(sizeof(HandlerData));
       data->sockfd = newsockfd;
       memcpy(&data->victim_addr, &victim_addr.sin_addr, sizeof(struct in_addr));
       pthread_t pid;
       pthread_create(&pid, NULL, handle_victim_request, data);  
       printf("One requester, %li\n", (unsigned long int) pid);
-      fflush(stdout);
+      fflush(stdout);*/
     }
   }  
 }
 
 int main ( int argc, char *argv[] )
 {
-  set_up_sniff_thread();
+  set_up_sniff_thread("lo");
   set_up_sig_handler();
   listen_victim();
   return 0;
