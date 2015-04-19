@@ -1,5 +1,6 @@
 /* Attacker host's gateway router */
 
+#include <pthread.h>
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
@@ -22,7 +23,7 @@
 /* Prototypes */
 void sendUDPDatagram(struct in_addr);
 void listenGatewayRequest(void);
-void notifyAttacker(void);
+int notifyAttacker(void);
 void handle_victim_gw_request(int, struct in_addr);
 
 /* Send UDP Datagrams */
@@ -147,15 +148,15 @@ void handle_victim_gw_request(int sockfd, struct in_addr victim_gw_addr) {
 		if (1/*received_RR == actual_RR*/) {
 			
 			/* Tell Attacker to stop sending traffic to flow */
-			//notifyAttacker();
 			printf("Notifying Attacker\n");
+			//notifyAttacker();
 			
 			/* Store filter in TCAM (filter table)*/
 			printf("Storing filter in TCAM\n");
 			
 			/* Send packet with nonce2 */
 			printf("Sending nonce2 to Victim Gateway\n");
-			msg = "123456789";
+			msg = "nonce2";
 			write(sockfd, msg, sizeof(msg));
 		}
 		/* Incorrect RR */
@@ -167,6 +168,13 @@ void handle_victim_gw_request(int sockfd, struct in_addr victim_gw_addr) {
 	}
 	
 	close(sockfd);
+}
+
+/* Tell Attacker to stop
+ * Disconnects Attacker if it doesn't stop
+ */
+int notifyAttacker() {
+	
 }
 
 int main() {
