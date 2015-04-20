@@ -231,22 +231,36 @@ int set_up_raw_socket(char* device)
     perror("Error binding raw socket to interface\n");
     exit(-1);
   }
+  /*
+  struct packet_mreq mreq;
+  mreq.mr_ifindex = ifr.ifr_ifindex;
+  mreq.mr_type = PACKET_MR_PROMISC;
+  mreq.mr_alen = 6;
+  setsockopt(raw_sock, SOL_PACKET, PACKET_ADD_MEMBERSHIP, (void*)&mreq, (socklen_t)sizeof(mreq));
+  */
   return raw_sock;
 }
 
 void read_packet(int raw_sock, void (*process_func)(void*, size_t))
 {
   unsigned char pkt[PACKET_SIZE];
-  struct sockaddr_in receiver;
-  socklen_t len = sizeof(receiver);
+  struct sockaddr_ll receiver;
+  socklen_t len;
 
   size_t size;
 
   printf("=====sniff starts======\n");
   while(1){
+    len = sizeof(receiver);
     size = recvfrom(raw_sock, pkt, PACKET_SIZE, 0, (struct sockaddr*)&receiver, &len);
+    //    printf("size of reciever %d\n", len);
+    //    printf("%d %d\n\n", receiver.sll_pkttype, receiver.sll_family);
+    if(receiver.sll_pkttype == PACKET_HOST){
+      (*process_func)((void*)(pkt + 14), size); 
+    }else if(receiver.sll_pkttype == PACKET_OUTGOING){
+    
+    }
     //Ethernet II has 14 bytes MAC header!
-    (*process_func)((void*)(pkt + 14), size); 
   }
 }
 
