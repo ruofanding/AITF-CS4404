@@ -17,14 +17,14 @@
 #define VICTIM_GATEWAY_PORT 50001
 #define ATTACKER_GATEWAY_IP_ADDRESS "127.0.0.1"
 
-int intercept_udp_packet(struct flow* flow_pt){
+int intercept_udp_packet(struct in_addr src_addr, struct in_addr dest_addr){
   int result;
   int intercept_rule_index;
 
   intercept_rule_index = get_intercept_rule_spot();
   printf("Assign rule index %d\n", intercept_rule_index);
-  memcpy(&intercept_rule_array[intercept_rule_index].src_addr, &flow_pt->src_addr, 
-	 sizeof(struct in_addr));
+  memcpy(&intercept_rule_array[intercept_rule_index].src_addr, &src_addr, sizeof(struct in_addr));
+  memcpy(&intercept_rule_array[intercept_rule_index].dest_addr, &dest_addr, sizeof(struct in_addr));
   intercept_rule_array[intercept_rule_index].requester = pthread_self();
 
   int rc = sleep(1000);
@@ -75,16 +75,6 @@ typedef struct{
   struct in_addr victim_addr;
 }HandlerData;
 
-void* test(void* data){
-  struct flow flow;
-  inet_aton("10.4.18.3", &flow.src_addr);
-  inet_aton("10.4.18.4", &flow.dest_addr);
-
-  int result;
-  result = intercept_udp_packet(&flow);
-  printf("Result: %d\n", result);
-}
-
 void* handle_victim_request(void* data){
   HandlerData* passed_data = (HandlerData*) data;
   int sockfd = passed_data->sockfd;
@@ -109,8 +99,10 @@ void* handle_victim_request(void* data){
   fflush(stdout);
 }
 
+/**
+ *Empty function for sigaction
+*/
 void signal_handler(int signo){
-
 }
 
 void set_up_sig_handler(){
@@ -162,11 +154,6 @@ void listen_victim(){
   struct sockaddr_in victim_addr;
   socklen_t addr_len;
 
-
-  pthread_t pid;
-  pthread_create(&pid, NULL, test, NULL);  
- 
-    
   while(1){
     // Do the accept
     addr_len = sizeof(victim_addr);
@@ -177,22 +164,32 @@ void listen_victim(){
       printf("---------connect to a new victim-------------\n");
 
       printf("%s\n", inet_ntoa((struct in_addr)victim_addr.sin_addr));
-      /*
+
       HandlerData* data = malloc(sizeof(HandlerData));
       data->sockfd = newsockfd;
       memcpy(&data->victim_addr, &victim_addr.sin_addr, sizeof(struct in_addr));
       pthread_t pid;
       pthread_create(&pid, NULL, handle_victim_request, data);  
       printf("One requester, %li\n", (unsigned long int) pid);
-      fflush(stdout);*/
+      fflush(stdout);
     }
   }  
 }
 
 int main ( int argc, char *argv[] )
 {
-  set_up_nfq();
+  pthread_t pid;
+  
+  pthread_create(&pid, NULL, (void*) set_up_nfq, NULL);
   set_up_sig_handler();
+  /*
+  sleep(1);
+  struct flow flow;
+  inet_aton("10.4.18.3", &flow.src_addr);
+  inet_aton("10.4.18.4", &flow.dest_addr);
+  flow.number = 0;
+  add_filter_temp(&flow);
+  */
   listen_victim();
   return 0;
 }

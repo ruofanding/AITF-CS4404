@@ -7,31 +7,36 @@
 #include <libnetfilter_queue/libnetfilter_queue.h>
 
 #include <stdlib.h>
-//#include <sys/signal.h> //SIG
-#include <signal.h>
+#include <signal.h> //SIGALRM
 #include <stdio.h>
 #include <string.h> //memcpy memset
 
 #include "netfilter.h"
+
 #define NFQUEUE_NUM 0
 
+void print_addr(char *msg, struct in_addr a){
+  printf("%s %s\n", msg, inet_ntoa(a));
+}
 
+inline int equalAddr(struct in_addr* a1, struct in_addr* a2)
+{
+  printf("Compare %s ", inet_ntoa(*a1));
+  printf("with %s\n", inet_ntoa(*a2));
+  if(memcmp(a1, a2, sizeof(struct in_addr))){
+    printf("not same\n");
+    return 0;
+  }else{
+    printf("same!\n");
+    return 1;
+  }
+}
+
+//============================Start of Intercept=======================
 InterceptRule intercept_rule_array[INTERCEPT_RULE_SIZE];
 int intercept_rule_used[INTERCEPT_RULE_SIZE];
 int intercept_rule_number;
 pthread_mutex_t intercept_lock;
-
-inline int equalAddr(struct in_addr* a1, struct in_addr* a2)
-{
-  return !memcmp(a1, a2, sizeof(struct in_addr));
-}
-
-void intercept_packet_set_up()
-{
-  memset(intercept_rule_used, 0, sizeof(intercept_rule_used));
-  pthread_mutex_init(&intercept_lock, NULL);
-}
-
 
 int get_intercept_rule_spot()
 {
@@ -59,7 +64,7 @@ void free_intercept_rule_spot(int index)
   pthread_mutex_unlock(&intercept_lock);
 }
 
-void intercept(struct in_addr src_addr, struct in_addr dest_addr){
+void intercept(struct in_addr src_addr, struct in_addr dest_addr, struct iphdr* iph){
   int i = 0;
   int counter = 0;
   for(counter = 0, i = 0; counter < intercept_rule_number; counter++, i++){
@@ -70,21 +75,124 @@ void intercept(struct in_addr src_addr, struct in_addr dest_addr){
     
     if(equalAddr(&src_addr, &intercept_rule_array[i].src_addr)
        && equalAddr(&dest_addr, &intercept_rule_array[i].dest_addr)){
-      /*
+
       struct udphdr *udph = (struct udphdr *)((void *) iph + sizeof(struct iphdr));
       char* msg = (char*)((void*)udph + sizeof(struct udphdr));
       uint16_t size = ntohs(udph->len);
       int msg_size = size - sizeof(struct udphdr);
 
       memcpy(&intercept_rule_array[i].nonce, msg, sizeof(intercept_rule_array[i].nonce));
-      printf("One match, %li\n", (unsigned long int) intercept_rule_array[i].requester);*/
-      intercept_rule_array[i].nonce = 1234;
+      printf("One match, %li\n", (unsigned long int) intercept_rule_array[i].requester);
       fflush(stdout);
 
       pthread_kill(intercept_rule_array[i].requester, SIGALRM);
     }
   }
 }
+//============================End of Intercept=======================
+
+
+//============================Start of Intercept=======================
+struct flow filter_rule_array[FILTER_RULE_SIZE];
+int filter_rule_used[FILTER_RULE_SIZE];
+int filter_rule_number = 0;
+pthread_mutex_t filter_lock;
+
+int get_filter_rule_spot()
+{
+  int i;
+  int result = -1;
+  pthread_mutex_lock(&filter_lock);
+  for(i = 0; i < FILTER_RULE_SIZE;i++){
+    if(!filter_rule_used[i]){
+      filter_rule_used[i] = 1;
+      filter_rule_number++;
+      result = i;
+      break;
+    }
+  }
+  pthread_mutex_unlock(&filter_lock);
+  return result;
+}
+
+void free_filter_rule_spot(int index)
+{
+  pthread_mutex_lock(&filter_lock);
+  filter_rule_number --;
+  filter_rule_used[index] = 0;
+  pthread_mutex_unlock(&filter_lock);
+}
+
+void add_filter_temp(struct flow* flow_pt)
+{
+  int filter_index = get_filter_rule_spot();
+  if(filter_index == -1){
+    printf("Fail to insert filter rule\n");
+    fflush(stdout);
+    return;
+  }
+
+  memcpy(&filter_rule_array[filter_index], flow_pt, sizeof(struct flow));
+  print_addr("add_filter dest", filter_rule_array[filter_index].dest_addr);
+  print_addr("add_filter src", filter_rule_array[filter_index].src_addr);
+
+  return ;
+}
+
+int match_filter_rule(struct flow* rule, struct flow* flow){
+  int i;
+
+  if(!equalAddr(&rule->dest_addr, &flow->dest_addr)){
+    return 0;
+  }
+
+  if(rule->number > flow->number){
+    return 0;
+  }
+  
+  for(i = 0; i < rule->number; i++){
+    if(!equalAddr(&(rule->route_record[i].addr), &(flow->route_record[i].addr))){
+      return 0;
+    }
+  }
+  
+  // src_addr will be compared only if source address is set not 0.0.0.0
+  if(flow->src_addr.s_addr ^ 0){ 
+    if(!equalAddr(&rule->src_addr, &flow->src_addr)){
+      return 0;
+    }
+  }
+  return 1;
+}
+
+/**
+ *@param flow the flow need to be checked by all filter rules
+ *@return result 0: pass, 1:drop
+ */
+int filter_out(struct flow* flow_pt)
+{
+  int i, counter ;
+  int d;
+
+  printf("filter_rule_number: %d\n", filter_rule_number);
+  for(i = 0, counter = 0; i < filter_rule_number; i++){
+    printf("%d %d\n", i, filter_rule_used[i]);
+    if(filter_rule_used[i]){
+      counter ++;
+      printf("Checking filter rule %d\n", i);
+      if(match_filter_rule(&filter_rule_array[i], flow_pt)){
+	return 1;
+      }
+    }
+    if(counter == filter_rule_number){
+      break;
+    }
+  }
+  return 0;
+}
+
+//============================End of FILTER=======================
+
 
 int cb (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
 	struct nfq_data *nfa, void *data)
@@ -96,7 +204,7 @@ int cb (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
   struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr (nfa);
   if (ph){
     id = ntohl (ph->packet_id);
-    printf ("received packet with id %d", id);
+    printf ("received packet with id %d\n", id);
   }
   
   ret = nfq_get_payload (nfa, &buffer);
@@ -108,30 +216,33 @@ int cb (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
 
   printf("From %s", inet_ntoa(src_addr));
   printf("to %s\n", inet_ntoa(dest_addr));
-  intercept(src_addr, dest_addr);
-  /*
-    if (ret)
-    {
-    switch (ph->hook)
-    {
-    case PREROUTING:
-    printf ( "inbound packet");
-    //my_mangling_fun();
-    break;
-    case OUTPUT:
-	  printf ( "outbound packet");
-	  //my_mangling_fun();
-	  break;
-	}
-	}*/
-  verdict = nfq_set_verdict (qh, id, NF_ACCEPT, ret, buffer);
-  if (verdict)
-    printf ( "verdict ok");
+  intercept(src_addr, dest_addr, ip_info);
+
+  struct flow flow;
+  flow.src_addr.s_addr = src_addr.s_addr;
+  flow.dest_addr.s_addr = dest_addr.s_addr;
+  flow.number = 0;
+
+  if(filter_out(&flow)){
+    printf("packet dropped\n");
+    verdict = nfq_set_verdict (qh, id, NF_DROP, 0, NULL);
+  }else{
+    printf("packet passed\n");
+    verdict = nfq_set_verdict (qh, id, NF_ACCEPT, ret, buffer);
+  }
+  printf("\n");
+  fflush(stdout);
   return verdict;
 }
 
 void set_up_nfq()
 {
+  //memset(intercept_rule_used, 0, sizeof(intercept_rule_used));
+  //pthread_mutex_init(&intercept_lock, NULL);
+
+  memset(filter_rule_used, 0, sizeof(filter_rule_used));
+  pthread_mutex_init(&filter_lock, NULL);
+
   struct nfq_handle * h = nfq_open();
   if (!h) {
     fprintf(stderr, "error during nfq_open()\n");
