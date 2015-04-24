@@ -150,7 +150,7 @@ void handle_victim_gw_request(int sockfd, struct in_addr attacker_addr) {
 			
 			/* Store filter in TCAM (filter table)*/
 			printf("Storing filter in TCAM\n");
-			// Store filter
+			//add_filter_temp(flow);
 			
 			/* Send packet with nonce2 */
 			printf("Sending nonce2 to Victim Gateway\n");
