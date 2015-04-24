@@ -26,27 +26,23 @@ void listenGatewayRequest(void);
 int notifyAttacker(void);
 void handle_victim_gw_request(int, struct in_addr);
 
-/* Send UDP Datagrams */
-void sendUDPDatagram(struct in_addr raw_v_addr) {
-	char *victim_addr = inet_ntoa((struct in_addr)raw_v_addr);
-	int sock, length, n;
-	struct sockaddr_in victim, from;
-	struct hostent *hp;
-	char *buffer;
+/* Send UDP Datagrams to specified target */
+void sendUDPDatagram(struct in_addr raw_h_addr, char *msg) {
+	char *host_addr = inet_ntoa((struct in_addr)raw_h_addr);
+	int sock, length;
+	struct sockaddr_in host;
 	
 	if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) == -1) {
 		perror("Socket\n");
 		exit(1);
 	}
 	
-	victim.sin_family = AF_INET;
-	victim.sin_port = htons(UDP_PORT);
-	inet_pton(AF_INET, victim_addr, &victim.sin_addr);
-	
-	buffer = "nonce1";
+	host.sin_family = AF_INET;
+	host.sin_port = htons(UDP_PORT);
+	inet_pton(AF_INET, host_addr, &host.sin_addr);
 	
 	length = sizeof(struct sockaddr_in);
-	if ((sendto(sock, buffer, strlen(buffer), 0, (struct sockaddr *)&victim, length)) < 0) {
+	if ((sendto(sock, msg, strlen(msg), 0, (struct sockaddr *)&host, length)) < 0) {
 		perror("Sendto\n");
 	}
 }
@@ -117,17 +113,18 @@ void listenGatewayRequest() {
 				process_id = fork();
 				if (process_id == 0) { //child process
 					int i = 0;
+					char *nonce1 = "1111";
 					
 					// Send UDP Datagrams
+					printf("Sending UDP Packets to %s\n", inet_ntoa((struct in_addr)flow.src_addr));
 					for (i = 0; i < 10; ++i) {
-						sendUDPDatagram(flow.src_addr); // check if input is right
-						printf("Sending UDP Packet to %s\n", inet_ntoa((struct in_addr)flow.src_addr));
+						sendUDPDatagram(flow.src_addr, nonce1); // check if input is right
 						usleep(1000);
 					}
 					_Exit(0);
 				}
 				else { //parent_process
-					handle_victim_gw_request(connected, client_addr.sin_addr);
+					handle_victim_gw_request(connected, flow.dest_addr);
 				}
 			}
 		}
@@ -135,7 +132,7 @@ void listenGatewayRequest() {
 }
 
 /* Send TCP Message to Victim GW with nonce2 */
-void handle_victim_gw_request(int sockfd, struct in_addr victim_gw_addr) {
+void handle_victim_gw_request(int sockfd, struct in_addr attacker_addr) {
 	char *msg;
 	char buf[256];
 	
@@ -149,13 +146,15 @@ void handle_victim_gw_request(int sockfd, struct in_addr victim_gw_addr) {
 			
 			/* Tell Attacker to stop sending traffic to flow */
 			printf("Notifying Attacker\n");
-			//notifyAttacker();
+			notifyAttacker(attacker_addr);
 			
 			/* Store filter in TCAM (filter table)*/
 			printf("Storing filter in TCAM\n");
+			// Store filter
 			
 			/* Send packet with nonce2 */
 			printf("Sending nonce2 to Victim Gateway\n");
+			// Insert shim
 			msg = "nonce2";
 			write(sockfd, msg, sizeof(msg));
 		}
@@ -163,7 +162,9 @@ void handle_victim_gw_request(int sockfd, struct in_addr victim_gw_addr) {
 		else {
 			/* Send packet with correct RR and nonce2 */
 			printf("Incorrect RR - Sending nonce2 to Victim Gateway\n");
-			
+			// Insert shim
+			msg = "nonce2";
+			write(sockfd, msg, sizeof(msg));
 		}
 	}
 	
@@ -173,8 +174,13 @@ void handle_victim_gw_request(int sockfd, struct in_addr victim_gw_addr) {
 /* Tell Attacker to stop
  * Disconnects Attacker if it doesn't stop
  */
-int notifyAttacker() {
-	
+int notifyAttacker(struct in_addr raw_h_addr) {
+	char *stop_msg = "AITFSTOP";
+	printf("Sending UDP Packets to %s\n", inet_ntoa((struct in_addr)raw_h_addr));
+	for (i = 0; i < 10; ++i) {
+		sendUDPDatagram(raw_h_addr, stop_msg);
+		usleep(1000);
+	}
 }
 
 int main() {
