@@ -1,4 +1,4 @@
 all: netfilter.c
-	gcc netfilter.c -lnfnetlink -lnetfilter_queue -o netfilter
+	gcc -c netfilter.c -lnfnetlink -lnetfilter_queue 
 clean:
 	rm -f netfilter

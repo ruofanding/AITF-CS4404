@@ -1,12 +1,90 @@
 #include <netinet/in.h>
 #include <netinet/ip.h>
+#include <netinet/udp.h>
 #include <arpa/inet.h>
-#include <stdio.h>
+
 #include <linux/netfilter.h>
 #include <libnetfilter_queue/libnetfilter_queue.h>
-#include <stdlib.h>
 
+#include <stdlib.h>
+//#include <sys/signal.h> //SIG
+#include <signal.h>
+#include <stdio.h>
+#include <string.h> //memcpy memset
+
+#include "netfilter.h"
 #define NFQUEUE_NUM 0
+
+
+InterceptRule intercept_rule_array[INTERCEPT_RULE_SIZE];
+int intercept_rule_used[INTERCEPT_RULE_SIZE];
+int intercept_rule_number;
+pthread_mutex_t intercept_lock;
+
+inline int equalAddr(struct in_addr* a1, struct in_addr* a2)
+{
+  return !memcmp(a1, a2, sizeof(struct in_addr));
+}
+
+void intercept_packet_set_up()
+{
+  memset(intercept_rule_used, 0, sizeof(intercept_rule_used));
+  pthread_mutex_init(&intercept_lock, NULL);
+}
+
+
+int get_intercept_rule_spot()
+{
+  int i;
+  int result = -1;
+  pthread_mutex_lock(&intercept_lock);
+  for(i = 0; i < INTERCEPT_RULE_SIZE;i++){
+    if(!intercept_rule_used[i]){
+      intercept_rule_used[i] = 1;
+      intercept_rule_number++;
+      result = i;
+      break;
+    }
+  }
+  pthread_mutex_unlock(&intercept_lock);
+  return result;
+}
+
+
+void free_intercept_rule_spot(int index)
+{
+  pthread_mutex_lock(&intercept_lock);
+  intercept_rule_number --;
+  intercept_rule_used[index] = 0;
+  pthread_mutex_unlock(&intercept_lock);
+}
+
+void intercept(struct in_addr src_addr, struct in_addr dest_addr){
+  int i = 0;
+  int counter = 0;
+  for(counter = 0, i = 0; counter < intercept_rule_number; counter++, i++){
+    while(!intercept_rule_used[i]){
+      i++;
+    }
+
+    
+    if(equalAddr(&src_addr, &intercept_rule_array[i].src_addr)
+       && equalAddr(&dest_addr, &intercept_rule_array[i].dest_addr)){
+      /*
+      struct udphdr *udph = (struct udphdr *)((void *) iph + sizeof(struct iphdr));
+      char* msg = (char*)((void*)udph + sizeof(struct udphdr));
+      uint16_t size = ntohs(udph->len);
+      int msg_size = size - sizeof(struct udphdr);
+
+      memcpy(&intercept_rule_array[i].nonce, msg, sizeof(intercept_rule_array[i].nonce));
+      printf("One match, %li\n", (unsigned long int) intercept_rule_array[i].requester);*/
+      intercept_rule_array[i].nonce = 1234;
+      fflush(stdout);
+
+      pthread_kill(intercept_rule_array[i].requester, SIGALRM);
+    }
+  }
+}
 
 int cb (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
 	struct nfq_data *nfa, void *data)
@@ -30,6 +108,7 @@ int cb (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
 
   printf("From %s", inet_ntoa(src_addr));
   printf("to %s\n", inet_ntoa(dest_addr));
+  intercept(src_addr, dest_addr);
   /*
     if (ret)
     {
@@ -51,7 +130,8 @@ int cb (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
   return verdict;
 }
 
-int main(){
+void set_up_nfq()
+{
   struct nfq_handle * h = nfq_open();
   if (!h) {
     fprintf(stderr, "error during nfq_open()\n");
@@ -86,9 +166,10 @@ int main(){
 
   int fd = nfq_fd(h);
   int rv;
-  char buf[65535];
+  char buf[0xffff];
   while ((rv = recv(fd, (void*)buf, sizeof(buf), 0)) >= 0) {
     printf("pkt received\n");
     nfq_handle_packet(h, buf, rv);
   }
 }
+

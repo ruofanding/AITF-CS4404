@@ -1,2 +1,0 @@
-all: netfilter.c
-	gcc netfilter.c -lnfnetlink -lnetfilter_queue

@@ -255,11 +255,11 @@ void read_packet(int raw_sock, void (*process_func)(void*, size_t))
     size = recvfrom(raw_sock, pkt, PACKET_SIZE, 0, (struct sockaddr*)&receiver, &len);
     //    printf("size of reciever %d\n", len);
     //    printf("%d %d\n\n", receiver.sll_pkttype, receiver.sll_family);
-    if(receiver.sll_pkttype == PACKET_HOST){
+    //    if(receiver.sll_pkttype == PACKET_HOST){
       (*process_func)((void*)(pkt + 14), size); 
-    }else if(receiver.sll_pkttype == PACKET_OUTGOING){
+      //}else if(receiver.sll_pkttype == PACKET_OUTGOING){
     
-    }
+      //}
     //Ethernet II has 14 bytes MAC header!
   }
 }

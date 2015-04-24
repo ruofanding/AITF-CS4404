@@ -9,7 +9,7 @@
 #include <pthread.h>
 #include <sys/signal.h>
 #include "flow.h"
-#include "sniff.h"
+#include "netfilter.h"
 
 #define BUFFER_SIZE 2056
 #define NAME_SIZE 256
@@ -74,6 +74,16 @@ typedef struct{
   int sockfd;
   struct in_addr victim_addr;
 }HandlerData;
+
+void* test(void* data){
+  struct flow flow;
+  inet_aton("10.4.18.3", &flow.src_addr);
+  inet_aton("10.4.18.4", &flow.dest_addr);
+
+  int result;
+  result = intercept_udp_packet(&flow);
+  printf("Result: %d\n", result);
+}
 
 void* handle_victim_request(void* data){
   HandlerData* passed_data = (HandlerData*) data;
@@ -153,6 +163,8 @@ void listen_victim(){
   socklen_t addr_len;
 
 
+  pthread_t pid;
+  pthread_create(&pid, NULL, test, NULL);  
  
     
   while(1){
@@ -179,7 +191,7 @@ void listen_victim(){
 
 int main ( int argc, char *argv[] )
 {
-  set_up_sniff_thread("lo");
+  set_up_nfq();
   set_up_sig_handler();
   listen_victim();
   return 0;
