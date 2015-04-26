@@ -11,7 +11,7 @@ static void die(struct ipq_handle *h) {
 	exit(1);
 }
 
-/* void * to allow for flexibility */
+/* void * to allow for flexibility, this is the new function */
 void *add_shim(void *src_addr, int *size) {
 	char *temp_buf = NULL;
 	
@@ -98,6 +98,7 @@ void insert_RR_shim(ipq_packet_msg_t msg, struct in_addr r_addr) {
 	memcpy(src_addr, temp_buf, msg->data_len);
 }
 
+/* DEPRECATED function */
 int modify_packet(struct in_addr router_addr) {
 	int status, i = 0;
 	unsigned char buf[BUFSIZE];
