@@ -11,6 +11,48 @@ static void die(struct ipq_handle *h) {
 	exit(1);
 }
 
+/* void * to allow for flexibility */
+void *add_shim(void *src_addr, int *size) {
+	char *temp_buf = NULL;
+	
+	/* Check options to see if packet already has an RR Shim */
+	if (((*(src_addr + 14)) & 0xF0) >> 4 != 5) {
+		/* Packet already has a Shim
+		 * Insert router IP addr and random R value */
+		hop_ctr = *(src_addr + 34);
+		memcpy(src_addr + 38 + hop_ctr*8, r_addr, 4);
+		memcpy(src_addr + 42 + hop_ctr*8, rr_val, 4);
+		hop_ctr++;
+		memcpy(src_addr + 34, &hop_ctr, 4);
+		return src_addr;
+	}
+	else {
+		temp_buf = malloc(*size + 52); // (shim + options)
+		
+		/* Copy MAC Header to temp buffer (14 bytes) */
+		memcpy(temp_buf, src_addr, 14);
+		
+		/* Copy and modify IHL */
+		memset(temp_buf + 14, ((src_addr + 14) | 0xF6), 1);
+		/* Copy rest of IP header */
+		memcpy(temp_buf + 15, src_addr + 15, 19);
+		/* Increment counter */
+		src_ctr = *(src_addr + 34) + 1;
+		memcpy(temp_buf + 34, &hop_ctr, 4);
+		
+		/* Insert Shim with random R value and router IP addr (shim = 48 bytes) */
+		memcpy(temp_buf + 38, r_addr, 4); // Insert IP addr
+		memcpy(temp_buf + 42, rr_val, 4); // Insert random R value
+		memset(temp_buf + 46, 0, 40); // 0 out rest of shim
+		
+		/* Copy rest of packet to temp buffer */
+		memcpy(temp_buf + 86, src_addr + 34, *size - 34);
+		*size += 52;
+		return temp_buf;
+	}
+}
+
+/* Unnecessary function; possibly DEPRECATED */
 void insert_RR_shim(ipq_packet_msg_t msg, struct in_addr r_addr) {
 	char temp_buf[1518];
 	uint32_t *src_addr;
