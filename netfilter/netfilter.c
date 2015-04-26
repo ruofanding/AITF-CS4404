@@ -23,13 +23,7 @@ inline int equalAddr(struct in_addr* a1, struct in_addr* a2)
 {
   printf("Compare %s ", inet_ntoa(*a1));
   printf("with %s\n", inet_ntoa(*a2));
-  if(memcmp(a1, a2, sizeof(struct in_addr))){
-    printf("not same\n");
-    return 0;
-  }else{
-    printf("same!\n");
-    return 1;
-  }
+  return !memcmp(a1, a2, sizeof(struct in_addr));
 }
 
 //============================Start of Intercept=======================
@@ -82,9 +76,8 @@ void intercept(struct in_addr src_addr, struct in_addr dest_addr, struct iphdr* 
       int msg_size = size - sizeof(struct udphdr);
 
       memcpy(&intercept_rule_array[i].nonce, msg, sizeof(intercept_rule_array[i].nonce));
-      printf("One match, %li\n", (unsigned long int) intercept_rule_array[i].requester);
+      printf("Net filter intercepts a udp with nonce = %x\n", intercept_rule_array[i].nonce); 
       fflush(stdout);
-
       pthread_kill(intercept_rule_array[i].requester, SIGALRM);
     }
   }
@@ -133,9 +126,10 @@ void add_filter_temp(struct flow* flow_pt)
   }
 
   memcpy(&filter_rule_array[filter_index], flow_pt, sizeof(struct flow));
+  /*
   print_addr("add_filter dest", filter_rule_array[filter_index].dest_addr);
   print_addr("add_filter src", filter_rule_array[filter_index].src_addr);
-
+  */
   return ;
 }
 
@@ -174,12 +168,9 @@ int filter_out(struct flow* flow_pt)
   int i, counter ;
   int d;
 
-  printf("filter_rule_number: %d\n", filter_rule_number);
   for(i = 0, counter = 0; i < filter_rule_number; i++){
-    printf("%d %d\n", i, filter_rule_used[i]);
     if(filter_rule_used[i]){
       counter ++;
-      printf("Checking filter rule %d\n", i);
       if(match_filter_rule(&filter_rule_array[i], flow_pt)){
 	return 1;
       }
@@ -204,7 +195,7 @@ int cb (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
   struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr (nfa);
   if (ph){
     id = ntohl (ph->packet_id);
-    printf ("received packet with id %d\n", id);
+    //printf ("received packet with id %d\n", id);
   }
   
   ret = nfq_get_payload (nfa, &buffer);
@@ -214,8 +205,8 @@ int cb (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
   dest_addr.s_addr = ip_info->daddr;
   src_addr.s_addr = ip_info->saddr;
 
-  printf("From %s", inet_ntoa(src_addr));
-  printf("to %s\n", inet_ntoa(dest_addr));
+  //printf("From %s", inet_ntoa(src_addr));
+  //printf("to %s\n", inet_ntoa(dest_addr));
   intercept(src_addr, dest_addr, ip_info);
 
   struct flow flow;
@@ -224,13 +215,13 @@ int cb (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
   flow.number = 0;
 
   if(filter_out(&flow)){
-    printf("packet dropped\n");
+    //printf("packet dropped\n");
     verdict = nfq_set_verdict (qh, id, NF_DROP, 0, NULL);
   }else{
-    printf("packet passed\n");
+    //printf("packet passed\n");
     verdict = nfq_set_verdict (qh, id, NF_ACCEPT, ret, buffer);
   }
-  printf("\n");
+  //printf("\n");
   fflush(stdout);
   return verdict;
 }

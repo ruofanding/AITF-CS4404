@@ -15,19 +15,22 @@
 #define NAME_SIZE 256
 #define ATTACKER_GATEWAY_PORT 50000
 #define VICTIM_GATEWAY_PORT 50001
-#define ATTACKER_GATEWAY_IP_ADDRESS "127.0.0.1"
-
+#define ATTACKER_GATEWAY_IP_ADDRESS "10.10.128.122"
+#define TIME_TO_WAIT 100000
 int intercept_udp_packet(struct in_addr src_addr, struct in_addr dest_addr){
   int result;
   int intercept_rule_index;
 
   intercept_rule_index = get_intercept_rule_spot();
-  printf("Assign rule index %d\n", intercept_rule_index);
-  memcpy(&intercept_rule_array[intercept_rule_index].src_addr, &src_addr, sizeof(struct in_addr));
-  memcpy(&intercept_rule_array[intercept_rule_index].dest_addr, &dest_addr, sizeof(struct in_addr));
+
+  memcpy(&intercept_rule_array[intercept_rule_index].src_addr, 
+	 &src_addr, sizeof(struct in_addr));
+  memcpy(&intercept_rule_array[intercept_rule_index].dest_addr, 
+	 &dest_addr, sizeof(struct in_addr));
+
   intercept_rule_array[intercept_rule_index].requester = pthread_self();
 
-  int rc = sleep(1000);
+  int rc = usleep(TIME_TO_WAIT);
   if(rc != 0){ // Signaled by sniff thread before finish sleep;
     result = intercept_rule_array[intercept_rule_index].nonce;
   }else{       // Not signaled by sniff thread, so no udp packet catched 
@@ -35,7 +38,6 @@ int intercept_udp_packet(struct in_addr src_addr, struct in_addr dest_addr){
   }
 
   free_intercept_rule_spot(intercept_rule_index);
-  printf("Thread ends at %d\n", rc); 
   return result;
 }
 
@@ -62,10 +64,30 @@ int send_filter_request(struct flow* flow_pt){
   }
   write(sock_fd, flow_pt, sizeof(struct flow));
 
-  int result;
-  result = intercept_udp_packet(flow_pt);
-  printf("Result: %d\n", result);
+  int nonce1 = intercept_udp_packet(attacker_gw_addr.sin_addr, flow_pt->dest_addr);
+  if(nonce1 == 0){
+    printf("Fail to intercept the udp packet.\n");
+  }else{
+    printf("Intercept the udp packet with nonce = %x.\n", nonce1);
+
+    int nonce2 = rand();
+    char buf[8];
   
+    //Concatenate nonce1 with nonce2
+    memcpy(buf, &nonce1, sizeof(int));
+    memcpy(buf + sizeof(int), &nonce2, sizeof(int));
+
+    write(sock_fd, buf, sizeof(int) * 2);
+
+    memset(buf, 0, sizeof(buf));
+    read(sock_fd, buf, sizeof(int) + sizeof(char));
+    if(memcmp(buf, &nonce2, sizeof(int))){
+      printf("not same\n");
+    }else{
+      printf("same\n");
+    }
+
+  }
   close(sock_fd);
   return 0;
 }
@@ -83,7 +105,7 @@ void* handle_victim_request(void* data){
   read(sockfd, &flow, sizeof(flow));
 
   char *msg;
-  if(memcmp(&flow.src_addr, &passed_data->victim_addr, 
+  if(memcmp(&flow.dest_addr, &passed_data->victim_addr, 
 	    sizeof(struct in_addr)) != 0){
     printf("Victim request's destination IP doesn't match victim's IP address\n");
     msg = "Fake IP!\n";
@@ -179,7 +201,6 @@ void listen_victim(){
 int main ( int argc, char *argv[] )
 {
   pthread_t pid;
-  
   pthread_create(&pid, NULL, (void*) set_up_nfq, NULL);
   set_up_sig_handler();
   /*

@@ -5,7 +5,7 @@
 
 struct record{
   struct in_addr addr;
-  int64_t hash_value;
+  int hash_value;
 };
 
 struct flow{
