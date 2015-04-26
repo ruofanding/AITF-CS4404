@@ -20,8 +20,6 @@
 #define NONCE_SIZE 64
 #define R_SIZE 64
 
-pthread_t p1[1000]; // Top layer threads
-
 struct arg_struct_cV {
 	struct in_addr victim_addr;
 	char nonce1[4];
@@ -76,7 +74,7 @@ void *listenGatewayRequest(void *arg) {
 	
 	arg_t->victim_addr = flow.dest_addr;*
 	arg_t->nonce1 = *nonce1;
-
+	
 	printf("Sending UDP Packets to Victim: %s\n", inet_ntoa((struct in_addr)flow.dest_addr));
 	pthread_create(&p2, NULL, contactVictim, arg_t);
 	handle_victim_gw_request(sockfd, flow.src_addr, nonce1);
@@ -158,12 +156,12 @@ void *contactVictim(void *arg) {
 	struct arg_struct_cV *args = arg;
 	struct in_addr victim_addr = args->victim_addr;
 	char *nonce1 = args->nonce1;
-
+	
 	for (i = 0; i < 10; ++i) {
 		sendUDPDatagram(victim_addr, nonce1); // check if input is right
 		usleep(1000);
 	}
-	free(nonce1);
+	free(arg);
 	pthread_exit(NULL);
 }
 
@@ -184,40 +182,45 @@ void notifyAttacker(struct in_addr raw_h_addr) {
 int main(int argc, char **argv) {
 	//printf("%d\n", sizeof(struct arg_struct_cV));
 	int i = 0;
-	while (1) {
-		int sock, connected, true = 1;
-		int sin_size = sizeof(struct sockaddr_in);
-		struct sockaddr_in server_addr, client_addr;
+	int sock, connected, true = 1;
+	int sin_size = sizeof(struct sockaddr_in);
+	struct sockaddr_in server_addr, client_addr;
 	
-		if ((sock = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-			perror("Error: Create Socket\n");
-			exit(1);
-		}
-		
-		if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &true, sizeof(int)) == -1) {
-			perror("Error: Setsockopt\n");
-			exit(1);
-		}
-		
-		server_addr.sin_family = AF_INET;
-		server_addr.sin_port = htons(TCP_PORT);
-		server_addr.sin_addr.s_addr = INADDR_ANY;
-		bzero(&(server_addr.sin_zero), 8);
-		
-		/* Bind Socket */
-		if (bind(sock, (struct sockaddr *)&server_addr, sizeof(struct sockaddr)) == -1) {
-			perror("Error: Unable to bind\n");
-			exit(1);
-		}
-		
-		/* Listen to Socket */
-		if (listen(sock, 10) == -1) {
-			perror("Error: Listen\n");
-			exit(1);
-		}
-		
-		printf("Listening on Port 50000\n");
-		fflush(stdout);
+	if ((sock = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+		perror("Error: Create Socket\n");
+		exit(1);
+	}
+	
+	if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &true, sizeof(int)) == -1) {
+		perror("Error: Setsockopt\n");
+		exit(1);
+	}
+	
+	server_addr.sin_family = AF_INET;
+	server_addr.sin_port = htons(TCP_PORT);
+	server_addr.sin_addr.s_addr = INADDR_ANY;
+	bzero(&(server_addr.sin_zero), 8);
+	
+	/* Bind Socket */
+	if (bind(sock, (struct sockaddr *)&server_addr, sizeof(struct sockaddr)) == -1) {
+		perror("Error: Unable to bind\n");
+		exit(1);
+	}
+	
+	/* Listen to Socket */
+	if (listen(sock, 10) == -1) {
+		perror("Error: Listen\n");
+		exit(1);
+	}
+	
+	printf("Listening on Port 50000\n");
+	fflush(stdout);
+	
+	while (1) {
+		pthread_t p1;
+		/* Create thread */
+		int *arg = malloc(sizeof(*arg));
+		*arg = connected;
 		
 		/* Accept Connection */
 		connected = accept(sock, (struct sockaddr*) &client_addr, &sin_size);
@@ -229,12 +232,9 @@ int main(int argc, char **argv) {
 			printf("---------Connected to a Victim Gateway-------------\n");
 			printf("gateway address: %s\n", inet_ntoa((struct in_addr)client_addr.sin_addr));
 			
-			/* Create thread */
-			int *arg = malloc(sizeof(*arg));
-			*arg = connected;
-
-			pthread_create(&p1[i], NULL, listenGatewayRequest, arg);
-			i++;
+			pthread_create(&p1, NULL, listenGatewayRequest, arg);
+			
+			fflush(stdout);
 		}
 	}
 	
