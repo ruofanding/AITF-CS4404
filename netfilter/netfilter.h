@@ -1,4 +1,5 @@
 #include "flow.h"
+#include <libnetfilter_queue/libnetfilter_queue.h>
 
 
 typedef struct{
@@ -16,6 +17,7 @@ extern int intercept_rule_number;
 /**
  * Get an index for intercept_rule_array where a intercept_rule can be put.
  * This is thread safe because it is using mutex.
+ * @return the index for the intercept rule array.
  */
 int get_intercept_rule_spot();
 
@@ -32,17 +34,28 @@ void free_intercept_rule_spot(int index);
 /** 
  * Filter out the flow for Ttmp.
  * @param flow a pointer to a flow which should be filter out
+ * @return result 0 for failing to add the filter rule
  */
-void add_filter_temp(struct flow* flow);
+int add_filter_temp(struct flow* flow);
 
 /** 
  * Filter out the flow for Tlong.
  * @param flow a pointer to a flow which should be filter out
+ * @return result 0 for failing to add the filter rule
  */
-void add_filter_long(struct flow* flow);
+int add_filter_long(struct flow* flow);
 
 
 /**
- * Set up the net filter queue. The setup includes open, bind, set_mode for nfq_queue, as well as setting up for intercept and filter.
+ * Set up the net filter queue. The setup includes open, bind, set_mode for nfq_queue, as well as setting up
+ * for intercept and filter.
+ * @return h nfq_handle
  */
-void set_up_nfq();
+struct nfq_handle* set_up_nfq();
+
+
+/**
+ * Run the net filter program. This function should only be called after set_up_nfq.
+ * @param h nfq_handel
+ */
+void run_nfq(struct nfq_handle* h);
