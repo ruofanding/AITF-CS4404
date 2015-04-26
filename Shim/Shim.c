@@ -14,6 +14,8 @@ static void die(struct ipq_handle *h) {
 /* void * to allow for flexibility, this is the new function */
 void *add_shim(void *src_addr, int *size) {
 	char *temp_buf = NULL;
+	uint32_t hop_ctr = 0;
+	uint32_t rr_val = 0xFFFFFFFFFFFFFFFF;
 	
 	/* Check options to see if packet already has an RR Shim */
 	if (((*(src_addr + 14)) & 0xF0) >> 4 != 5) {
