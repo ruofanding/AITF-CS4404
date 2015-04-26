@@ -6,53 +6,160 @@
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
-
+#include <pthread.h>
+#include <sys/signal.h>
 #include "flow.h"
+#include "netfilter.h"
 
-#define BUFFER_SIZE 2056
-#define NAME_SIZE 256
 #define ATTACKER_GATEWAY_PORT 50000
 #define VICTIM_GATEWAY_PORT 50001
-#define ATTACKER_GATEWAY_IP_ADDRESS "192.168.1.1"
+#define TIME_TO_WAIT 100000
 
-void send_filter_request(){
-  struct sockaddr_in attacker_gw_addr;
+int intercept_udp_packet(struct in_addr src_addr, struct in_addr dest_addr){
+  int result;
+  int intercept_rule_index;
+
+  intercept_rule_index = get_intercept_rule_spot();
+
+  memcpy(&intercept_rule_array[intercept_rule_index].src_addr, 
+	 &src_addr, sizeof(struct in_addr));
+  memcpy(&intercept_rule_array[intercept_rule_index].dest_addr, 
+	 &dest_addr, sizeof(struct in_addr));
+
+  intercept_rule_array[intercept_rule_index].requester = pthread_self();
+
+  int rc = usleep(TIME_TO_WAIT);
+  if(rc != 0){ // Signaled by sniff thread before finish sleep;
+    result = intercept_rule_array[intercept_rule_index].nonce;
+  }else{       // Not signaled by sniff thread, so no udp packet catched 
+    result = 0;
+  }
+
+  free_intercept_rule_spot(intercept_rule_index);
+  return result;
+}
+
+/** Victim gateway will contact with the attacker's gateway to filter out
+ *  the undesired flow.
+ * @param flow_pt a pointer to struct flow, which should be filtered out.
+ * @param upper_gateay the IP address of the upstream gateway that will be
+ * contacted.
+ */
+int send_filter_request(struct flow* flow_pt, struct in_addr upstream_gateway){
   int sock_fd;
   
   // create a socket
   sock_fd = socket(AF_INET, SOCK_STREAM, 0);
   if (sock_fd < 0)   {
     printf("socket setup error");
-    return;
+    return 1;
   }
   
-  // set up the sockaddr_in structure.  
+  // set up the sockaddr_in structure.
+  struct sockaddr_in attacker_gw_addr;  
   attacker_gw_addr.sin_family = AF_INET;
   attacker_gw_addr.sin_port = htons(ATTACKER_GATEWAY_PORT);
-  inet_aton(ATTACKER_GATEWAY_IP_ADDRESS, &attacker_gw_addr.sin_addr);
-  
-  if (connect(sock_fd, (struct sockaddr *) &attacker_gw_addr, sizeof(attacker_gw_addr)) < 0)  {
+  //inet_aton(ATTACKER_GATEWAY_IP_ADDRESS, &attacker_gw_addr.sin_addr);
+  attacker_gw_addr.sin_addr.s_addr = upstream_gateway.s_addr;
+
+  if (connect(sock_fd, (struct sockaddr *) &attacker_gw_addr, 
+	      sizeof(attacker_gw_addr)) < 0)  {
     printf("socket connection fail");
-    return;
+    return 1;
   }
-  //  write(sock_fd, H_END, strlen(H_END));
+  write(sock_fd, flow_pt, sizeof(struct flow));
+
+  //Intercetp nonce1
+  int nonce1 = intercept_udp_packet(attacker_gw_addr.sin_addr, flow_pt->dest_addr);
+  if(nonce1 == 0){
+    printf("Fail to intercept the udp packet.\n");
+    close(sock_fd);
+    return 1;
+  }
+  printf("Intercept the udp packet with nonce = %x.\n", nonce1);
+  
+  //Send nonce1 with nonce2
+  int nonce2 = rand();
+  char buf[8];  
+  memcpy(buf, &nonce1, sizeof(int));
+  memcpy(buf + sizeof(int), &nonce2, sizeof(int));
+  write(sock_fd, buf, sizeof(int) * 2);
+
+  //Read nonce2 with success/fail 
+  memset(buf, 0, sizeof(buf));
+  read(sock_fd, buf, sizeof(int) + sizeof(char));
   close(sock_fd);
+  if(memcmp(buf, &nonce2, sizeof(int))){
+    return 1;
+  }
+  
+  if((buf[4]^0xff) == 0){ //Success
+    return 0;
+  }else{
+    return 1;
+  }
 }
 
-void handle_victim_request(int sockfd, struct in_addr victim_addr){
+typedef struct{
+  int sockfd;
+  struct in_addr victim_addr;
+}HandlerData;
+
+void* handle_victim_request(void* data){
+  HandlerData* passed_data = (HandlerData*) data;
+  int sockfd = passed_data->sockfd;
+  struct in_addr victim_addr;
+  victim_addr.s_addr = passed_data->victim_addr.s_addr;
+  free(passed_data);
+  
   struct flow flow;
   read(sockfd, &flow, sizeof(flow));
-  char *msg;
 
-  if(memcmp(&flow.src_addr, &victim_addr, sizeof(struct in_addr)) != 0){
+  char *msg;
+  //Compare the destination IP address with requester's IP address
+  if(memcmp(&flow.dest_addr, &victim_addr, sizeof(struct in_addr)) != 0){
     printf("Victim request's destination IP doesn't match victim's IP address\n");
-    msg = "Fake IP!\n";
+    msg = "Fail";
+    write(sockfd, msg, sizeof(msg));
+    close(sockfd);
+    return;
   }else{
     printf("Reqeust from: %s\n", inet_ntoa(flow.src_addr));
-    msg = "OK\n";
   }
+
+  //Contact with upstream gateways.
+  int i;
+  for(i = 0; i < flow.number; i++){
+    if(send_filter_request(&flow, flow.route_record[i].addr) == 0){
+      break;
+    }
+  }
+
+  if(i == flow.number){ //Fail to install filter rule remotely
+    add_filter_temp(&flow); //Install filter rule locally
+  }
+
+  msg = "OK";
   write(sockfd, msg, sizeof(msg));
   close(sockfd);
+  return;
+}
+
+/**
+ *Empty function for sigaction
+*/
+void signal_handler(int signo){
+}
+
+void set_up_sig_handler(){
+  struct sigaction actions;
+  
+  memset(&actions, 0, sizeof(actions));
+  sigemptyset(&actions.sa_mask);
+  actions.sa_flags = 0;
+  actions.sa_handler = signal_handler;
+  
+  sigaction(SIGALRM,&actions,NULL);
 }
 
 void listen_victim(){
@@ -71,7 +178,8 @@ void listen_victim(){
   server_addr.sin_family = AF_INET;
   server_addr.sin_addr.s_addr = INADDR_ANY; 
   server_addr.sin_port = htons((int) VICTIM_GATEWAY_PORT);
-  if(bind(serverfd, (struct sockaddr *) &server_addr, sizeof(server_addr)) != 0 ){
+  if(bind(serverfd, (struct sockaddr *) &server_addr, 
+	  sizeof(server_addr)) != 0 ){
     printf("Bind error.\n");
     fflush(stdout);
     exit(1);
@@ -91,7 +199,7 @@ void listen_victim(){
   int newsockfd;
   struct sockaddr_in victim_addr;
   socklen_t addr_len;
-    
+
   while(1){
     // Do the accept
     addr_len = sizeof(victim_addr);
@@ -102,20 +210,32 @@ void listen_victim(){
       printf("---------connect to a new victim-------------\n");
 
       printf("%s\n", inet_ntoa((struct in_addr)victim_addr.sin_addr));
-      pid_t process_id;
-      process_id = fork();
-      if(process_id == 0){ //child process
-	handle_victim_request(newsockfd, victim_addr.sin_addr);
-	_Exit(0);
-      }else{ //parent_process
-	
-      }
+
+      HandlerData* data = malloc(sizeof(HandlerData));
+      data->sockfd = newsockfd;
+      memcpy(&data->victim_addr, &victim_addr.sin_addr, sizeof(struct in_addr));
+      pthread_t pid;
+      pthread_create(&pid, NULL, handle_victim_request, data);  
+      printf("One requester, %li\n", (unsigned long int) pid);
+      fflush(stdout);
     }
   }  
 }
 
 int main ( int argc, char *argv[] )
 {
+  set_up_sig_handler();
+
+  pthread_t pid;
+  struct nfq_handle* h = set_up_nfq();
+  pthread_create(&pid, NULL, (void*) run_nfq, h);
+  
+  struct flow flow;
+  inet_aton("10.4.18.2", &flow.src_addr);
+  inet_aton("10.4.18.1", &flow.dest_addr);
+  flow.number = 0;
+
+  //add_filter_temp(&flow);
   listen_victim();
   return 0;
 }
