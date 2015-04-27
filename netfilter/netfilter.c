@@ -20,6 +20,10 @@ inline void print_addr(char *msg, struct in_addr a){
   printf("%s %s\n", msg, inet_ntoa(a));
 }
 
+inline void assign_addr(struct in_addr* a, struct in_addr* b){
+  a->s_addr = b->s_addr;
+}
+
 inline int equalAddr(struct in_addr* a1, struct in_addr* a2)
 {
   printf("Compare %s ", inet_ntoa(*a1));
@@ -225,6 +229,7 @@ int filter_out(struct flow* flow_pt)
 
 //============================End of FILTER=======================
 
+void *add_shim(struct iphdr* ip, int *size);
 
 int cb (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
 	struct nfq_data *nfa, void *data)
@@ -254,21 +259,125 @@ int cb (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
   flow.src_addr.s_addr = src_addr.s_addr;
   flow.dest_addr.s_addr = dest_addr.s_addr;
   flow.number = 0;
+  
+  
+  int size = ret;
+  buffer = add_shim(ip_info, &size);
 
+  printf("new size: %d\n", size);
   if(filter_out(&flow)){
     printf("packet dropped\n");
     verdict = nfq_set_verdict (qh, id, NF_DROP, 0, NULL);
   }else{
     printf("packet passed\n");
-    verdict = nfq_set_verdict (qh, id, NF_ACCEPT, ret, buffer);
+    verdict = nfq_set_verdict (qh, id, NF_ACCEPT, size, buffer);
   }
+  
+  if(size != ret){
+    free(buffer);
+  }
+
   printf("\n");
   fflush(stdout);
   return verdict;
 }
 
+#define AITF_PROTOCOL_NUM 253
+typedef struct{
+  int origin_protocol;
+  int number;
+  struct record route_record[6];
+}Shim;
+
+void *add_shim(struct iphdr* ip, int *size) {
+  struct in_addr my_addr;
+  my_addr.s_addr = 0xffffffff;
+  int iphdr_size = ip->ihl * 4;
+  int shim_size = sizeof(Shim);
+  unsigned short total_size = ntohs(ip->tot_len);
+
+  printf("%d %hu %d\n", iphdr_size, total_size, *size);
+  Shim* shim;
+  if(ip->protocol != AITF_PROTOCOL_NUM){
+    ip->protocol == AITF_PROTOCOL_NUM;
+    struct iphdr* new_ip = malloc(ip->tot_len + shim_size);
+    shim = (void*)new_ip + iphdr_size;
+    //Set the size to total_size + shim_size.
+    *size = *size + shim_size;
+    
+    //Copy the ip header. 
+    memcpy(new_ip, ip, iphdr_size);
+    new_ip->tot_len = htons(*size);
+    
+    //Set the protocol number, and store the origin protocol number.
+    shim->origin_protocol = ip->protocol;
+    new_ip->protocol = AITF_PROTOCOL_NUM;   
+
+    //Init the number of route records.
+    shim->number = 0;
+
+    //Copy data after IP header
+    memcpy((void*)new_ip + iphdr_size + shim_size, (void*) ip + iphdr_size, 
+	   total_size - iphdr_size);
+    
+
+    //Add route record
+    assign_addr(&shim->route_record[shim->number].addr, &my_addr);
+    shim->number++;
+    return new_ip;
+
+  }else{
+
+    shim = (void*)ip + iphdr_size;
+    assign_addr(&shim->route_record[shim->number].addr, &my_addr);
+    shim->number++;
+    return ip;
+
+  }
+}
+
+#ifdef NO
+  /* Check options to see if packet already has an RR Shim */
+  if (((*(src_addr + 14)) & 0xF0) >> 4 != 5) {
+    /* Packet already has a Shim
+     * Insert router IP addr and random R value */
+    hop_ctr = *(src_addr + 34);
+    memcpy(src_addr + 38 + hop_ctr*8, r_addr, 4);
+    memcpy(src_addr + 42 + hop_ctr*8, rr_val, 4);
+    hop_ctr++;
+		memcpy(src_addr + 34, &hop_ctr, 4);
+		return src_addr;
+  }
+  else {
+    temp_buf = malloc(*size + 52); // (shim + options)
+    
+    /* Copy MAC Header to temp buffer (14 bytes) */
+    memcpy(temp_buf, src_addr, 14);
+		
+    /* Copy and modify IHL */
+    memset(temp_buf + 14, ((src_addr + 14) | 0xF6), 1);
+    /* Copy rest of IP header */
+    memcpy(temp_buf + 15, src_addr + 15, 19);
+    /* Increment counter */
+    src_ctr = *(src_addr + 34) + 1;
+    memcpy(temp_buf + 34, &hop_ctr, 4);
+    
+    /* Insert Shim with random R value and router IP addr (shim = 48 bytes) */
+    memcpy(temp_buf + 38, r_addr, 4); // Insert IP addr
+    memcpy(temp_buf + 42, rr_val, 4); // Insert random R value
+    memset(temp_buf + 46, 0, 40); // 0 out rest of shim
+    
+    /* Copy rest of packet to temp buffer */
+    memcpy(temp_buf + 86, src_addr + 34, *size - 34);
+    *size += 52;
+    return temp_buf;
+  }
+}
+#endif
+
 struct nfq_handle * set_up_nfq()
 {
+  printf("size:%d\n", sizeof(Shim));
   memset(intercept_rule_used, 0, sizeof(intercept_rule_used));
   pthread_mutex_init(&intercept_lock, NULL);
 
