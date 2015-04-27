@@ -227,9 +227,12 @@ int main ( int argc, char *argv[] )
   set_up_sig_handler();
 
   pthread_t pid;
-  struct nfq_handle* h = set_up_nfq();
+  struct nfq_handle* h = set_up_forward_nfq();
   pthread_create(&pid, NULL, (void*) run_nfq, h);
-  
+
+  h = set_up_in_nfq();
+  pthread_create(&pid, NULL, (void*) run_nfq, h);
+
   struct flow flow;
   inet_aton("10.4.18.2", &flow.src_addr);
   inet_aton("10.4.18.1", &flow.dest_addr);
