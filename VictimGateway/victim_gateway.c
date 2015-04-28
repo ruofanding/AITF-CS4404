@@ -10,10 +10,11 @@
 #include <sys/signal.h>
 #include "flow.h"
 #include "netfilter.h"
-
 #define ATTACKER_GATEWAY_PORT 50000
 #define VICTIM_GATEWAY_PORT 50001
 #define TIME_TO_WAIT 100000
+
+struct in_addr my_addr;
 
 int intercept_udp_packet(struct in_addr src_addr, struct in_addr dest_addr){
   int result;
@@ -44,6 +45,9 @@ int intercept_udp_packet(struct in_addr src_addr, struct in_addr dest_addr){
  * @param flow_pt a pointer to struct flow, which should be filtered out.
  * @param upper_gateay the IP address of the upstream gateway that will be
  * contacted.
+ * @return result 0 if request succeeds
+ *                1 if AITF fails or not corporates
+ *               -1 if RR shim is not correct.
  */
 int send_filter_request(struct flow* flow_pt, struct in_addr upstream_gateway){
   int sock_fd;
@@ -96,7 +100,7 @@ int send_filter_request(struct flow* flow_pt, struct in_addr upstream_gateway){
   if((buf[4]^0xff) == 0){ //Success
     return 0;
   }else{
-    return 1;
+    return -1;
   }
 }
 
@@ -104,6 +108,19 @@ typedef struct{
   int sockfd;
   struct in_addr victim_addr;
 }HandlerData;
+
+void shift_flow(struct flow *flow){
+  if(flow->number == 0){
+    return;
+  }
+
+  int i;
+  for(i=0; i < flow->number - 1; i++){
+    memcpy(&flow->route_record[i], &flow->route_record[i+1], sizeof(struct record));
+  }
+  
+  flow->number--;
+}
 
 void* handle_victim_request(void* data){
   HandlerData* passed_data = (HandlerData*) data;
@@ -129,13 +146,24 @@ void* handle_victim_request(void* data){
 
   //Contact with upstream gateways.
   int i;
-  for(i = 0; i < flow.number; i++){
-    if(send_filter_request(&flow, flow.route_record[i].addr) == 0){
+  int success = 0;
+  while(flow.number > 0){
+    print_flow(&flow);
+    if(equal_addr(&flow.route_record[i].addr, &my_addr)){
       break;
     }
+
+    if(send_filter_request(&flow, flow.route_record[i].addr) == 0){
+      success = 1;
+      break;
+
+    }else{    
+      shift_flow(&flow);
+
+    } 
   }
 
-  if(i == flow.number){ //Fail to install filter rule remotely
+  if(!success){ //Fail to install filter rule remotely
     add_filter_temp(&flow); //Install filter rule locally
   }
 
@@ -147,7 +175,7 @@ void* handle_victim_request(void* data){
 
 /**
  *Empty function for sigaction
-*/
+ */
 void signal_handler(int signo){
 }
 
@@ -224,14 +252,16 @@ void listen_victim(){
 
 int main ( int argc, char *argv[] )
 {
+  get_my_addr("eth0", &my_addr);
+
   set_up_sig_handler();
 
   pthread_t pid;
   struct nfq_handle* h = set_up_forward_nfq();
   pthread_create(&pid, NULL, (void*) run_nfq, h);
 
-  h = set_up_in_nfq();
-  pthread_create(&pid, NULL, (void*) run_nfq, h);
+  //h = set_up_in_nfq();
+  //pthread_create(&pid, NULL, (void*) run_nfq, h);
 
   struct flow flow;
   inet_aton("10.4.18.2", &flow.src_addr);
