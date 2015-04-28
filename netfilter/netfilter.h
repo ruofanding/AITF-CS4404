@@ -47,15 +47,23 @@ int add_filter_long(struct flow* flow);
 
 
 /**
- * Set up the net filter queue. The setup includes open, bind, set_mode for nfq_queue, as well as setting up
- * for intercept and filter.
+ * Set up the netfilter FORWARD queue. The setup includes open, bind, set_mode
+ * for nfq_queue, as well as setting up for intercept and filter. It is also
+ * responsible for adding shim.
  * @return h nfq_handle
  */
-struct nfq_handle* set_up_nfq();
+struct nfq_handle* set_up_forward_nfq();
+
+/**
+ * Set up the netfilter IN queue. The setup includes open, bind, set_mode for
+ * nfq_queue. It is responsible for removing shim.
+ * @return h nfq_handle
+ */
+struct nfq_handle* set_up_in_nfq();
 
 
 /**
- * Run the net filter program. This function should only be called after set_up_nfq.
+ * Run the net filter program. This function should only be called after set_up_*_nfq.
  * @param h nfq_handel
  */
 void run_nfq(struct nfq_handle* h);
