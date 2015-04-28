@@ -1,4 +1,8 @@
 sudo iptables --flush
-sudo iptables -A FORWARD -i eth0 -j NFQUEUE --queue-num 0
-sudo iptables -A INPUT -i eth0 -j NFQUEUE --queue-num 0
+sudo iptables -A FORWARD -p udp -i eth0 -j NFQUEUE --queue-num 0
+sudo iptables -A FORWARD -p icmp -i eth0 -j NFQUEUE --queue-num 0
 
+sudo iptables -A INPUT -p udp -i eth0 -j NFQUEUE --queue-num 1
+sudo iptables -A INPUT -p icmp -i eth0 -j NFQUEUE --queue-num 1
+
+#sudo iptables -A OUTPUT  -p udp -j NFQUEUE --queue-num 0

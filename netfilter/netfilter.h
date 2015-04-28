@@ -14,6 +14,18 @@ extern InterceptRule intercept_rule_array[INTERCEPT_RULE_SIZE];
 extern int intercept_rule_used[INTERCEPT_RULE_SIZE];
 extern int intercept_rule_number;
 
+
+inline void print_addr(char *msg, struct in_addr a);
+
+inline void assign_addr(struct in_addr* a, struct in_addr* b);
+
+inline int equal_addr(struct in_addr* a1, struct in_addr* a2);
+
+inline void print_flow(struct flow* flow);
+
+void get_my_addr(char* device, struct in_addr* addr);
+
+
 /**
  * Get an index for intercept_rule_array where a intercept_rule can be put.
  * This is thread safe because it is using mutex.
@@ -47,15 +59,23 @@ int add_filter_long(struct flow* flow);
 
 
 /**
- * Set up the net filter queue. The setup includes open, bind, set_mode for nfq_queue, as well as setting up
- * for intercept and filter.
+ * Set up the netfilter FORWARD queue. The setup includes open, bind, set_mode
+ * for nfq_queue, as well as setting up for intercept and filter. It is also
+ * responsible for adding shim.
  * @return h nfq_handle
  */
-struct nfq_handle* set_up_nfq();
+struct nfq_handle* set_up_forward_nfq();
+
+/**
+ * Set up the netfilter IN queue. The setup includes open, bind, set_mode for
+ * nfq_queue. It is responsible for removing shim.
+ * @return h nfq_handle
+ */
+struct nfq_handle* set_up_in_nfq();
 
 
 /**
- * Run the net filter program. This function should only be called after set_up_nfq.
+ * Run the net filter program. This function should only be called after set_up_*_nfq.
  * @param h nfq_handel
  */
 void run_nfq(struct nfq_handle* h);
