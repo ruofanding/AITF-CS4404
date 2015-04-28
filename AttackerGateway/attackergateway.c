@@ -22,18 +22,18 @@
 
 struct arg_struct_cV {
 	struct in_addr victim_addr;
-	char nonce1[4];
+	int nonce1;
 };
 
 /* Prototypes */
-void sendUDPDatagram(struct in_addr, char *);
+void sendUDPDatagram(struct in_addr, void *, int);
 void *listenGatewayRequest(void *);
 void *contactVictim(void *);
 void notifyAttacker(struct in_addr);
-void handle_victim_gw_request(int, struct in_addr, char *);
+void handle_victim_gw_request(int, struct in_addr, int);
 
 /* Send UDP Datagrams to specified target */
-void sendUDPDatagram(struct in_addr raw_h_addr, char *msg) {
+void sendUDPDatagram(struct in_addr raw_h_addr, void *msg, int msg_size) {
 	char *host_addr = inet_ntoa((struct in_addr)raw_h_addr);
 	int sock, length;
 	struct sockaddr_in host;
@@ -48,7 +48,7 @@ void sendUDPDatagram(struct in_addr raw_h_addr, char *msg) {
 	inet_pton(AF_INET, host_addr, &host.sin_addr);
 	
 	length = sizeof(struct sockaddr_in);
-	if ((sendto(sock, msg, strlen(msg), 0, (struct sockaddr *)&host, length)) < 0) {
+	if ((sendto(sock, msg, msg_size, 0, (struct sockaddr *)&host, length)) < 0) {
 		perror("Sendto\n");
 	}
 }
@@ -59,12 +59,14 @@ void *listenGatewayRequest(void *arg) {
 	pthread_t p2;
 	int sockfd = *((int *)arg);
 	free(arg);
-	char *nonce1 = malloc(4);
-	nonce1 = "1234";
+	int nonce1 = 0xFFFF;
 	struct flow flow;
+	bzero(&flow, 60);
 	
+	int size;
 	/* Read from socket */
-	read(sockfd, &flow, sizeof(flow));
+	size = read(sockfd, &flow, sizeof(flow));
+	printf("Size read: %d\n", size);
 	printf("Received filter request:\n");
 	printf("src:  %s\n", inet_ntoa((struct in_addr)flow.src_addr));
 	printf("dest: %s\n", inet_ntoa((struct in_addr)flow.dest_addr));
@@ -72,8 +74,8 @@ void *listenGatewayRequest(void *arg) {
 	/* Spawn child thread to spam UDP at victim */
 	struct arg_struct_cV *arg_t = malloc(sizeof(struct arg_struct_cV));
 	
-	arg_t->victim_addr = flow.dest_addr;*
-	arg_t->nonce1 = *nonce1;
+	arg_t->victim_addr = flow.dest_addr;
+	arg_t->nonce1 = nonce1;
 	
 	printf("Sending UDP Packets to Victim: %s\n", inet_ntoa((struct in_addr)flow.dest_addr));
 	pthread_create(&p2, NULL, contactVictim, arg_t);
@@ -82,27 +84,18 @@ void *listenGatewayRequest(void *arg) {
 }
 
 /* Send TCP Message to Victim GW with nonce2 */
-void handle_victim_gw_request(int sockfd, struct in_addr attacker_addr, char *nonce1) {
-	int i = 0, strcmp_flg = 1;
-	char msg[5];
-	char buf[8];
-	memset(buf, 0, 8);
-	memset(msg, 0, 5);
+void handle_victim_gw_request(int sockfd, struct in_addr attacker_addr, int nonce1) {
+	int i = 0, strcmp_flg = 0;
+	int nonce_recv[2];
 	
-	int size = read(sockfd, buf, sizeof(buf));
-	for (i = 0; i < 4; i++) {
-		msg[i] = buf[i + 4];
-	}
-	printf("Received nonce1 value: %s\n", buf);
-	printf("Received nonce2 value: %s\n", msg);
-	printf("Actual nonce1 value  : %s\n", nonce1);
+	int size = read(sockfd, nonce_recv, sizeof(nonce_recv));
+
+	printf("Received nonce1 value: %d\n", nonce_recv[0]);
+	printf("Received nonce2 value: %d\n", nonce_recv[1]);
+	printf("Actual nonce1 value  : %d\n", nonce1);
 	
-	/* Compare original nonce1 and received nonce1 */
-	for (i = 0; i < 4; i++) {
-		fflush(stdout);
-		if (nonce1[i] != buf[i]) {
-			strcmp_flg = 0;
-		}
+	if (nonce_recv[0] == nonce1) {
+		strcmp_flg = 1;
 	}
 	
 	/* Check nonce1 value (2nd line of content) */
@@ -122,13 +115,13 @@ void handle_victim_gw_request(int sockfd, struct in_addr attacker_addr, char *no
 			printf("Sending nonce2 to Victim Gateway\n");
 			// Insert shim
 			if (1/* TODO: Check R value */) {
-				msg[4] = 0xFF;
+				//msg[4] = 0xFF;
 			}
 			else {
-				msg[4] = 0x00;
+				//msg[4] = 0x00;
 			}
 			
-			write(sockfd, msg, sizeof(msg));
+			write(sockfd, &nonce_recv[1], sizeof(int));
 		}
 		/* Incorrect RR */
 		else {
@@ -136,13 +129,13 @@ void handle_victim_gw_request(int sockfd, struct in_addr attacker_addr, char *no
 			printf("Incorrect RR - Sending nonce2 to Victim Gateway\n");
 			// Insert shim
 			if (1/* TODO: Check R value */) {
-				msg[4] = 0xFF;
+				//msg[4] = 0xFF;
 			}
 			else {
-				msg[4] = 0x00;
+				//msg[4] = 0x00;
 			}
 			
-			write(sockfd, msg, sizeof(msg));
+			write(sockfd, &nonce_recv[1], sizeof(int));
 		}
 	}
 	
@@ -155,13 +148,12 @@ void *contactVictim(void *arg) {
 	int i = 0;
 	struct arg_struct_cV *args = arg;
 	struct in_addr victim_addr = args->victim_addr;
-	char *nonce1 = args->nonce1;
+	int nonce1 = args->nonce1;
 	
 	for (i = 0; i < 10; ++i) {
-		sendUDPDatagram(victim_addr, nonce1); // check if input is right
+		sendUDPDatagram(victim_addr, &nonce1, sizeof(int)); // check if input is right
 		usleep(1000);
 	}
-	free(arg);
 	pthread_exit(NULL);
 }
 
@@ -174,7 +166,7 @@ void notifyAttacker(struct in_addr raw_h_addr) {
 	
 	printf("Sending UDP Packets to Attacker: %s\n", inet_ntoa((struct in_addr)raw_h_addr));
 	for (i = 0; i < 10; ++i) {
-		sendUDPDatagram(raw_h_addr, stop_msg);
+		sendUDPDatagram(raw_h_addr, stop_msg, strlen(stop_msg));
 		usleep(1000);
 	}
 }
@@ -219,11 +211,11 @@ int main(int argc, char **argv) {
 	while (1) {
 		pthread_t p1;
 		/* Create thread */
-		int *arg = malloc(sizeof(*arg));
-		*arg = connected;
+		int *arg = malloc(sizeof(int));
 		
 		/* Accept Connection */
 		connected = accept(sock, (struct sockaddr*) &client_addr, &sin_size);
+		*arg = connected;
 		
 		if (connected < 0) {
 			printf("Error: Accept\n");
