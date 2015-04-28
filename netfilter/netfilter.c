@@ -332,6 +332,9 @@ void *add_shim(struct iphdr* ip, int *size) {
     //Add route record
     assign_addr(&shim->route_record[shim->number].addr, &my_addr);
     shim->number++;
+    
+    //Recalculate the checksum
+    nfq_ip_set_checksum(new_ip);
     return new_ip;
 
   }else{
