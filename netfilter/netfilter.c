@@ -235,6 +235,7 @@ int match_filter_rule(struct flow* rule, struct flow* flow){
     return 0;
   }
 
+  /*
   if(rule->number > flow->number){
     return 0;
   }
@@ -243,7 +244,7 @@ int match_filter_rule(struct flow* rule, struct flow* flow){
     if(!equal_addr(&(rule->route_record[i].addr), &(flow->route_record[i].addr))){
       return 0;
     }
-  }
+    }*/
   
   // src_addr will be compared only if source address is set not 0.0.0.0
   if(flow->src_addr.s_addr ^ 0){ 
@@ -280,9 +281,10 @@ int filter_out(struct flow* flow_pt)
 //============================End of FILTER=======================
 
 //============================Start of FORWARD NFQ=======================
+int private_key;
+struct in_addr my_addr;
+
 void *add_shim(struct iphdr* ip, int *size) {
-  struct in_addr my_addr;
-  my_addr.s_addr = 0xffffffff;
   int iphdr_size = ip->ihl * 4;
   int shim_size = sizeof(Shim);
   unsigned short total_size = ntohs(ip->tot_len);
@@ -319,6 +321,8 @@ void *add_shim(struct iphdr* ip, int *size) {
 
     //Add route record
     assign_addr(&shim->route_record[shim->number].addr, &my_addr);
+    shim->route_record[shim->number].hash_value = 
+      ip->daddr ^ private_key;
     shim->number++;
     
     //Recalculate the checksum
@@ -329,6 +333,9 @@ void *add_shim(struct iphdr* ip, int *size) {
 
     shim = (void*)ip + iphdr_size;
     assign_addr(&shim->route_record[shim->number].addr, &my_addr);
+    shim->route_record[shim->number].hash_value = 
+      ip->daddr ^ private_key;
+    
     shim->number++;
     return ip;
 
@@ -396,6 +403,11 @@ struct nfq_handle * set_up_forward_nfq()
   memset(filter_rule_used, 0, sizeof(filter_rule_used));
   pthread_mutex_init(&filter_lock, NULL);
 
+  srand(time(NULL));
+  private_key = rand();
+  get_my_addr("eth0", &my_addr);
+  printf("My private key is %x\n", private_key);
+
   //Run filter clean thread
   pthread_t pid;
   pthread_create(&pid, NULL, clean_filter_rule, NULL);
@@ -440,7 +452,6 @@ struct nfq_handle * set_up_forward_nfq()
 //============================Start of IN NFQ=======================
 
 int remove_shim(struct iphdr* ip, int size) {
-  struct in_addr my_addr;
   int iphdr_size = ip->ihl * 4;
   int shim_size = sizeof(Shim);
   unsigned short total_size = ntohs(ip->tot_len);

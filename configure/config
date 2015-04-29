@@ -1,7 +1,12 @@
 sudo apt-get install libnetfilter-queue-dev
 sudo apt-get install make
 
-#sysctl -w net.ipv4.ip_forward=1
+sysctl -w net.ipv4.ip_forward=1
 sysctl -w net.ipv4.conf.eth0.send_redirects=0
 sysctl -w net.ipv4.conf.eth0.accept_redirects=0
 sysctl -w net.ipv6.conf.eth0.accept_redirects=0
+
+iptables --flush
+iptables -A FORWARD ! -p tcp -i eth0 -j NFQUEUE --queue-num 0
+iptables -A INPUT ! -p tcp -i eth0 -j NFQUEUE --queue-num 1
+iptables -A OUTPUT -p icmp --icmp-type redirect -j DROP

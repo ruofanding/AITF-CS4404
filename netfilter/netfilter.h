@@ -13,7 +13,8 @@ typedef struct{
 extern InterceptRule intercept_rule_array[INTERCEPT_RULE_SIZE];
 extern int intercept_rule_used[INTERCEPT_RULE_SIZE];
 extern int intercept_rule_number;
-
+extern struct in_addr my_addr;
+extern int private_key;
 
 inline void print_addr(char *msg, struct in_addr a);
 
@@ -38,7 +39,6 @@ int get_intercept_rule_spot();
  * This is thread safe because it is using mutex.
  */
 void free_intercept_rule_spot(int index);
-
 
 
 #define FILTER_RULE_SIZE 1000
