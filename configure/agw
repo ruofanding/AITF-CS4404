@@ -1,0 +1,9 @@
+ip route flush cache
+
+ip route add 10.4.18.1 via 10.4.18.3
+ip route add 10.10.128.150 via 10.4.18.3
+ip route add 10.4.18.4 via 10.4.18.3
+
+iptables --flush
+iptables -A FORWARD ! -p tcp -i eth0 -j NFQUEUE --queue-num 0
+

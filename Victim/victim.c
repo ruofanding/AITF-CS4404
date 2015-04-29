@@ -41,7 +41,7 @@ void send_filter_request(){
   inet_aton("10.4.18.100", &(flow.src_addr)); 
   flow.number = 3;
 
-  inet_aton("10.4.18.101", &(flow.route_record[0].addr)); 
+  inet_aton("10.10.128.122", &(flow.route_record[0].addr)); 
   inet_aton("10.4.18.102", &(flow.route_record[1].addr));
   inet_aton("10.4.18.103", &(flow.route_record[2].addr));
 
@@ -59,9 +59,11 @@ int main ( int argc, char *argv[] )
   get_my_addr("eth0", &my_addr);
 
   pthread_t pid;
-  struct nfq_handle* h = set_up_forward_nfq();
+  struct nfq_handle* h = set_up_in_nfq();
   pthread_create(&pid, NULL, (void*) run_nfq, h);
-
-  send_filter_request();
+  while(1){
+    sleep(10);
+  }
+  //send_filter_request();
   return 0;
 }
