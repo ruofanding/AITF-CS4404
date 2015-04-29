@@ -14,6 +14,18 @@ extern InterceptRule intercept_rule_array[INTERCEPT_RULE_SIZE];
 extern int intercept_rule_used[INTERCEPT_RULE_SIZE];
 extern int intercept_rule_number;
 
+
+inline void print_addr(char *msg, struct in_addr a);
+
+inline void assign_addr(struct in_addr* a, struct in_addr* b);
+
+inline int equal_addr(struct in_addr* a1, struct in_addr* a2);
+
+inline void print_flow(struct flow* flow);
+
+void get_my_addr(char* device, struct in_addr* addr);
+
+
 /**
  * Get an index for intercept_rule_array where a intercept_rule can be put.
  * This is thread safe because it is using mutex.

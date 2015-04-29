@@ -6,6 +6,8 @@
 #include <linux/netfilter.h>
 #include <libnetfilter_queue/libnetfilter_queue.h>
 
+#include <ifaddrs.h> //getifaddrs
+
 #include <stdlib.h>
 #include <signal.h> //SIGALRM
 #include <stdio.h>
@@ -34,7 +36,7 @@ inline void assign_addr(struct in_addr* a, struct in_addr* b){
   a->s_addr = b->s_addr;
 }
 
-inline int equalAddr(struct in_addr* a1, struct in_addr* a2)
+inline int equal_addr(struct in_addr* a1, struct in_addr* a2)
 {
   printf("Compare %s ", inet_ntoa(*a1));
   printf("with %s\n", inet_ntoa(*a2));
@@ -49,6 +51,28 @@ inline void print_flow(struct flow* flow){
   }
   printf("%s\n", inet_ntoa(flow->dest_addr));
 }
+
+void get_my_addr(char* device, struct in_addr* addr){
+  struct ifaddrs *ifap, *tmp;
+
+  getifaddrs(&ifap);
+  tmp = ifap;
+
+  while(tmp){
+
+    if(tmp->ifa_addr->sa_family == AF_INET && strcmp(tmp->ifa_name, device) == 0){
+      struct sockaddr_in *pAddr = (struct sockaddr_in *)tmp->ifa_addr;
+      addr->s_addr = pAddr->sin_addr.s_addr;
+      break;
+    }
+
+    tmp = tmp->ifa_next;
+
+  }
+
+  freeifaddrs(ifap);
+}
+
 //============================Helper functions=======================
 
 
@@ -84,19 +108,35 @@ void free_intercept_rule_spot(int index)
   pthread_mutex_unlock(&intercept_lock);
 }
 
-void intercept(struct in_addr src_addr, struct in_addr dest_addr, struct iphdr* iph){
+void 
+intercept(struct in_addr src_addr, struct in_addr dest_addr, struct iphdr* iph){
   int i = 0;
   int counter = 0;
+  struct udphdr* udph;
+
+  if(iph->protocol == AITF_PROTOCOL_NUM){
+    Shim* shim = (void*) iph + sizeof(struct iphdr);
+
+    //Not udp packet
+    if(shim->origin_protocol != 17){
+      return ;
+    }
+    udph = (struct udphdr *)((void*)shim + sizeof(Shim));
+
+  }else if(iph->protocol == 17){
+
+    udph = (struct udphdr *)((void *) iph + sizeof(struct iphdr));
+
+  }
+
   for(counter = 0, i = 0; counter < intercept_rule_number; counter++, i++){
     while(!intercept_rule_used[i]){
       i++;
     }
 
-    
-    if(equalAddr(&src_addr, &intercept_rule_array[i].src_addr)
-       && equalAddr(&dest_addr, &intercept_rule_array[i].dest_addr)){
-
-      struct udphdr *udph = (struct udphdr *)((void *) iph + sizeof(struct iphdr));
+    if(equal_addr(&src_addr, &intercept_rule_array[i].src_addr)
+       && equal_addr(&dest_addr, &intercept_rule_array[i].dest_addr)){
+      
       char* msg = (char*)((void*)udph + sizeof(struct udphdr));
       uint16_t size = ntohs(udph->len);
       int msg_size = size - sizeof(struct udphdr);
@@ -191,7 +231,7 @@ int add_filter_temp(struct flow* flow_pt)
 int match_filter_rule(struct flow* rule, struct flow* flow){
   int i;
 
-  if(!equalAddr(&rule->dest_addr, &flow->dest_addr)){
+  if(!equal_addr(&rule->dest_addr, &flow->dest_addr)){
     return 0;
   }
 
@@ -200,14 +240,14 @@ int match_filter_rule(struct flow* rule, struct flow* flow){
   }
   
   for(i = 0; i < rule->number; i++){
-    if(!equalAddr(&(rule->route_record[i].addr), &(flow->route_record[i].addr))){
+    if(!equal_addr(&(rule->route_record[i].addr), &(flow->route_record[i].addr))){
       return 0;
     }
   }
   
   // src_addr will be compared only if source address is set not 0.0.0.0
   if(flow->src_addr.s_addr ^ 0){ 
-    if(!equalAddr(&rule->src_addr, &flow->src_addr)){
+    if(!equal_addr(&rule->src_addr, &flow->src_addr)){
       return 0;
     }
   }
@@ -239,59 +279,7 @@ int filter_out(struct flow* flow_pt)
 
 //============================End of FILTER=======================
 
-void *add_shim(struct iphdr* ip, int *size);
-
-int forward_callback (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
-		      struct nfq_data *nfa, void *data)
-{
-  int verdict;
-  int id;
-  int ret;
-  unsigned char *buffer;
-  struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr (nfa);
-  if (ph){
-    id = ntohl (ph->packet_id);
-    //printf ("received packet with id %d\n", id);
-  }
-  
-  ret = nfq_get_payload (nfa, &buffer);
-  struct iphdr * ip_info = (struct iphdr *)buffer;
-  struct in_addr dest_addr;
-  struct in_addr src_addr;
-  dest_addr.s_addr = ip_info->daddr;
-  src_addr.s_addr = ip_info->saddr;
-
-  printf("From %s", inet_ntoa(src_addr));
-  printf("to %s\n", inet_ntoa(dest_addr));
-  intercept(src_addr, dest_addr, ip_info);
-
-  struct flow flow;
-  flow.src_addr.s_addr = src_addr.s_addr;
-  flow.dest_addr.s_addr = dest_addr.s_addr;
-  flow.number = 0;
-  
-  
-  int size = ret;
-  buffer = add_shim(ip_info, &size);
-
-  printf("new size: %d\n", size);
-  if(filter_out(&flow)){
-    printf("packet dropped\n");
-    verdict = nfq_set_verdict (qh, id, NF_DROP, 0, NULL);
-  }else{
-    printf("packet passed\n");
-    verdict = nfq_set_verdict (qh, id, NF_ACCEPT, size, buffer);
-  }
-  
-  if(size != ret){
-    free(buffer);
-  }
-
-  printf("\n");
-  fflush(stdout);
-  return verdict;
-}
-
+//============================Start of FORWARD NFQ=======================
 void *add_shim(struct iphdr* ip, int *size) {
   struct in_addr my_addr;
   my_addr.s_addr = 0xffffffff;
@@ -347,6 +335,56 @@ void *add_shim(struct iphdr* ip, int *size) {
   }
 }
 
+int forward_callback (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
+		      struct nfq_data *nfa, void *data)
+{
+  int verdict;
+  int id;
+  int ret;
+  unsigned char *buffer;
+  struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr (nfa);
+  if (ph){
+    id = ntohl (ph->packet_id);
+    //printf ("received packet with id %d\n", id);
+  }
+  
+  ret = nfq_get_payload (nfa, &buffer);
+  struct iphdr * ip_info = (struct iphdr *)buffer;
+  struct in_addr dest_addr;
+  struct in_addr src_addr;
+  dest_addr.s_addr = ip_info->daddr;
+  src_addr.s_addr = ip_info->saddr;
+
+  printf("From %s", inet_ntoa(src_addr));
+  printf("to %s\n", inet_ntoa(dest_addr));
+  intercept(src_addr, dest_addr, ip_info);
+
+  struct flow flow;
+  flow.src_addr.s_addr = src_addr.s_addr;
+  flow.dest_addr.s_addr = dest_addr.s_addr;
+  flow.number = 0;
+  
+  
+  int size = ret;
+  buffer = add_shim(ip_info, &size);
+
+  printf("new size: %d\n", size);
+  if(filter_out(&flow)){
+    printf("packet dropped\n");
+    verdict = nfq_set_verdict (qh, id, NF_DROP, 0, NULL);
+  }else{
+    printf("packet passed\n");
+    verdict = nfq_set_verdict (qh, id, NF_ACCEPT, size, buffer);
+  }
+  
+  if(size != ret){
+    free(buffer);
+  }
+
+  printf("\n");
+  fflush(stdout);
+  return verdict;
+}
 
 struct nfq_handle * set_up_forward_nfq()
 {
@@ -381,7 +419,7 @@ struct nfq_handle * set_up_forward_nfq()
   }
 
 
-  printf("binding this socket to queue '0'\n");
+  printf("binding this socket to queue '%d'\n", FORWARD_NFQUEUE_NUM);
   struct nfq_q_handle * qh = nfq_create_queue(h, FORWARD_NFQUEUE_NUM, 
 					      forward_callback, NULL);
   if (!qh) {
@@ -397,18 +435,9 @@ struct nfq_handle * set_up_forward_nfq()
   return h;
 }
 
-void run_nfq(struct nfq_handle *h){
-  int fd = nfq_fd(h);
-  int rv;
-  char buf[0xffff];
+//============================End of FORWARD NFQ=======================
 
-  while ((rv = recv(fd, (void*)buf, sizeof(buf), 0)) >= 0) {
-
-    printf("pkt received\n");
-    nfq_handle_packet(h, buf, rv);
-
-  }
-}
+//============================Start of IN NFQ=======================
 
 int remove_shim(struct iphdr* ip, int size) {
   struct in_addr my_addr;
@@ -500,7 +529,7 @@ struct nfq_handle * set_up_in_nfq()
     exit(1);
   }
 
-  printf("binding this socket to queue '0'\n");
+  printf("binding this socket to queue '%d'\n", IN_NFQUEUE_NUM);
   struct nfq_q_handle * qh = nfq_create_queue(h,  IN_NFQUEUE_NUM, 
 					      in_callback, NULL);
   if (!qh) {
@@ -514,4 +543,19 @@ struct nfq_handle * set_up_in_nfq()
     exit(1);
   }
   return h;
+}
+//============================End of IN NFQ=======================
+
+
+void run_nfq(struct nfq_handle *h){
+  int fd = nfq_fd(h);
+  int rv;
+  char buf[0xffff];
+
+  while ((rv = recv(fd, (void*)buf, sizeof(buf), 0)) >= 0) {
+
+    printf("pkt received\n");
+    nfq_handle_packet(h, buf, rv);
+
+  }
 }
