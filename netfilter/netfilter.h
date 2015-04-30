@@ -9,6 +9,12 @@ typedef struct{
   int nonce;
 }InterceptRule;
 
+typedef struct{
+  int origin_protocol;
+  int number;
+  struct record route_record[6];
+}Shim;
+
 #define INTERCEPT_RULE_SIZE 1000
 extern InterceptRule intercept_rule_array[INTERCEPT_RULE_SIZE];
 extern int intercept_rule_used[INTERCEPT_RULE_SIZE];

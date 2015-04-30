@@ -21,11 +21,6 @@
 
 
 #define AITF_PROTOCOL_NUM 253
-typedef struct{
-  int origin_protocol;
-  int number;
-  struct record route_record[6];
-}Shim;
 
 //============================Helper functions=======================
 inline void print_addr(char *msg, struct in_addr a){
