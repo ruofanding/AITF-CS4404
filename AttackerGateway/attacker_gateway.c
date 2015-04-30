@@ -74,8 +74,6 @@ void *acceptGatewayRequest(void *arg) {
   size = read(sockfd, &flow, sizeof(flow));
   printf("Received filter request:\n");
   print_flow(&flow);
-  printf("src:  %s\n", inet_ntoa((struct in_addr)flow.src_addr));
-  printf("dest: %s\n", inet_ntoa((struct in_addr)flow.dest_addr));
   
   /* Spawn child thread to spam UDP at victim */
   struct arg_struct_cV *arg_t = malloc(sizeof(struct arg_struct_cV));
@@ -96,9 +94,9 @@ void handle_victim_gw_request(int sockfd, struct flow* flow, int nonce1) {
   
   int size = read(sockfd, nonce_recv, sizeof(nonce_recv));
   
-  printf("Received nonce1 value: %d\n", nonce_recv[0]);
-  printf("Received nonce2 value: %d\n", nonce_recv[1]);
-  printf("Actual nonce1 value  : %d\n", nonce1);
+  //printf("Received nonce1 value: %d\n", nonce_recv[0]);
+  //printf("Received nonce2 value: %d\n", nonce_recv[1]);
+  //printf("Actual nonce1 value  : %d\n", nonce1);
   
   int respond[2];
   respond[0] = nonce_recv[1];
@@ -109,7 +107,8 @@ void handle_victim_gw_request(int sockfd, struct flow* flow, int nonce1) {
     /* Check R value for Attacker GW (check RR shim) */
     for(i = 0; i < flow->number; i++){
       if(equal_addr(&flow->route_record[i].addr, &my_addr)){
-	if(my_addr.s_addr^private_key == flow->route_record[i].hash_value){
+	if(decrypt(flow->route_record[i].hash_value, private_key) 
+	   == flow->route_record[i].hash_value){
 	  RR_spoofing = 0;
 	}else{
 	  RR_spoofing = 1;
@@ -122,7 +121,7 @@ void handle_victim_gw_request(int sockfd, struct flow* flow, int nonce1) {
       add_filter_temp(flow);
 
       /* Tell Attacker to stop sending traffic to flow */
-      notifyAttacker(flow->src_addr);
+      //notifyAttacker(flow->src_addr);
     }
 
     respond[1] = RR_spoofing;

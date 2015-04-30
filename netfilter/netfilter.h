@@ -30,6 +30,8 @@ inline int encrypt(int plain, int key);
 
 inline int decrypt(int cipher, int key);
 
+
+
 #define NODE_CHILDREN_MAX 20
 
 struct node{
@@ -41,6 +43,8 @@ struct node{
 
 typedef struct node Node;
 
+extern Node* stat_root;
+
 void add_flow(Node* current, struct flow *flow, int flow_index);
 
 void print_node(Node* node, int c);
@@ -49,6 +53,7 @@ void free_node(Node* node);
 
 struct flow*  undesired_flow(Node* node, int root);
 
+void enable_statistic(double frequency);
 
 /**
  * Get an index for intercept_rule_array where a intercept_rule can be put.

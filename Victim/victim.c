@@ -51,12 +51,58 @@ void send_filter_request(struct flow *flow){
 int main ( int argc, char *argv[] )
 {
   get_my_addr("eth0", &my_addr);
+  /*
+  struct flow flow;
+  flow.number = 3;
+  assign_addr(&flow.dest_addr, &my_addr);
+  inet_aton("10.4.18.1", &(flow.route_record[0].addr)); 
+  flow.route_record[0].hash_value = 0;
+  inet_aton("10.4.18.2", &(flow.route_record[1].addr)); 
+  flow.route_record[1].hash_value = 1;
+  inet_aton("10.4.18.3", &(flow.route_record[2].addr)); 
+  flow.route_record[2].hash_value = 2;
+  inet_aton("10.4.18.4", &(flow.src_addr)); 
+  
+  Node* root = malloc(sizeof(Node));;
+  root->record.addr.s_addr = my_addr.s_addr;
+  root->counter = 0;
+  root->children_size = 0;
+  add_flow(root, &flow, 3);
+  flow.route_record[1].hash_value = 0xff;
+
+  add_flow(root, &flow, 3);
+  inet_aton("10.4.18.5", &(flow.src_addr)); 
+
+  add_flow(root, &flow, 3);
+
+  inet_aton("10.4.18.6", &(flow.route_record[0].addr)); 
+  inet_aton("10.4.18.8", &(flow.src_addr)); 
+  add_flow(root, &flow, 3);
+  
+  int i;
+  for(i = 0; i < 25; i++){
+    flow.src_addr.s_addr = i;
+    add_flow(root, &flow, 3);
+  }
+  print_node(root, 1);
+  struct flow* unflow;
+  unflow = undesired_flow(root, 1);
+  if(unflow != NULL){
+    unflow->dest_addr.s_addr = my_addr.s_addr;
+    print_flow(unflow);
+  }
+  free_node(root);
+  return 0;*/
+  
+  get_my_addr("eth0", &my_addr);
   print_addr("My ip", my_addr);
   pthread_t pid;
   struct nfq_handle* h = set_up_in_nfq();
-  pthread_create(&pid, NULL, (void*) run_nfq, h);
-
-  struct flow flow;
+  enable_statistic(1);
+  //pthread_create(&pid, NULL, (void*) run_nfq, h);
+  run_nfq(h);
+  /*
+  //  struct flow flow;
   assign_addr(&flow.dest_addr, &my_addr);
   inet_aton("10.4.18.1", &(flow.src_addr)); 
   flow.number = 2;
@@ -69,5 +115,5 @@ int main ( int argc, char *argv[] )
     sleep(10);
   }
   //send_filter_request();
-  return 0;
+  return 0;*/
 }

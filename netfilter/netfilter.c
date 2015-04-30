@@ -27,6 +27,8 @@ typedef struct{
   struct record route_record[6];
 }Shim;
 
+int statistic_enable = 0;
+
 //============================Helper functions=======================
 inline void print_addr(char *msg, struct in_addr a){
   printf("%s %s\n", msg, inet_ntoa(a));
@@ -451,6 +453,8 @@ struct nfq_handle * set_up_forward_nfq()
 //============================End of FORWARD NFQ=======================
 
 //============================Start of Policy module=======================
+Node* stat_root;
+
 inline equal_record(struct record* r1, struct record* r2){
   if(memcmp(r1, r2, sizeof(struct record)) == 0){
     return 1;
@@ -462,6 +466,7 @@ inline equal_record(struct record* r1, struct record* r2){
 inline assign_record(struct record* r1, struct record* r2){
   memcpy(r1, r2, sizeof(struct record));
 }
+
 void add_flow(Node* current, struct flow *flow, int flow_index){
   int i;
   struct record* next_record;
@@ -493,6 +498,7 @@ void add_flow(Node* current, struct flow *flow, int flow_index){
   if(current->children_size < NODE_CHILDREN_MAX){
     Node* new_child = (Node*) malloc(sizeof(Node));
     assign_record(&new_child->record, next_record);
+   
     new_child->counter = 0;
     new_child->children_size = 0;
     
@@ -501,13 +507,15 @@ void add_flow(Node* current, struct flow *flow, int flow_index){
 
     add_flow(new_child, flow, flow_index - 1);
 
-    return;
   }else{
     current->children_size++;
   }
 }
 
 void print_node(Node* node, int c){
+  if(node == NULL){
+    return;
+  }
   int i,j;
   printf("%d %d ",node->counter, node->children_size); 
   printf("%x ", node->record.hash_value);
@@ -563,6 +571,8 @@ struct flow*  undesired_flow(Node* node, int root){
 	if(!root){
 	  assign_record(&flow->route_record[flow->number], &node->record);
 	  flow->number++;
+	}else{
+	  flow->dest_addr.s_addr = my_addr.s_addr;
 	}
       }
       return flow;
@@ -573,6 +583,9 @@ struct flow*  undesired_flow(Node* node, int root){
 }
 
 void free_node(Node* node){
+  if(node == NULL){
+    return;
+  }
   int i;
 
   int size = (node->children_size < NODE_CHILDREN_MAX)? 
@@ -582,6 +595,60 @@ void free_node(Node* node){
     free_node(node->children[i]);
   }
   free(node);
+}
+
+int refresh_stat = 1;
+
+void stat_refresh(int usec){
+  struct flow* flow;
+  while(1){
+    if(refresh_stat == 0){
+      flow = undesired_flow(stat_root, 1);
+      if(flow != NULL){
+	print_flow(flow);
+      }
+      refresh_stat = 1;
+    }
+    usleep(usec);
+  }
+}
+void enable_statistic(double frequency)
+{
+  stat_root = NULL;
+  pthread_t pid;
+  int usec = frequency * 1000000;
+  pthread_create(&pid, NULL, stat_refresh, (void*)usec);
+  statistic_enable = 1;
+}
+
+
+void update_stat(struct iphdr* ip)
+{
+  if(statistic_enable && ip->protocol == AITF_PROTOCOL_NUM){
+    if(stat_root != NULL && refresh_stat == 1){
+      free_node(stat_root);
+      stat_root = NULL;
+      refresh_stat = 0;
+    }
+    if(stat_root == NULL){
+      refresh_stat = 0;
+      stat_root = malloc(sizeof(Node));
+      stat_root->children_size = 0;
+      stat_root->counter = 0;
+      stat_root->record.addr.s_addr = my_addr.s_addr;
+    }
+   
+    int i;
+    Shim* shim = (void*)ip + sizeof(struct iphdr);
+    struct flow flow;
+    for(i = 0; i < shim->number; i++){
+      memcpy(&flow.route_record[i], & shim->route_record[i], 
+	     sizeof(struct record));
+    }
+    flow.number = shim->number;
+    flow.src_addr.s_addr = ip->saddr;
+    add_flow(stat_root, &flow, flow.number);
+  }
 }
 //============================End of Policy module=======================
 
@@ -595,7 +662,7 @@ int remove_shim(struct iphdr* ip, int size) {
 
   if(total_size != size){
     printf("The size doesn't match\n");
-    return;
+    return size;
   }
 
   Shim* shim;
@@ -613,6 +680,10 @@ int remove_shim(struct iphdr* ip, int size) {
     memcpy(buffer, (void*)ip + iphdr_size + shim_size, sizeof(buffer));
     memcpy((void*)ip + iphdr_size, buffer, sizeof(buffer));
 
+    //Recalculate the checksum
+    nfq_ip_set_checksum(ip);
+
+
     return total_size - shim_size;
 
   }else{
@@ -622,6 +693,7 @@ int remove_shim(struct iphdr* ip, int size) {
   }
 }
 
+int counter = 1;
 int in_callback (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
 		 struct nfq_data *nfa, void *data)
 {
@@ -633,7 +705,7 @@ int in_callback (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
   if (ph){
     id = ntohl (ph->packet_id);
   }
-  
+
   ret = nfq_get_payload (nfa, &buffer);
   struct iphdr * ip_info = (struct iphdr *)buffer;
   struct in_addr dest_addr;
@@ -643,7 +715,8 @@ int in_callback (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
 
   //printf("From %s", inet_ntoa(src_addr));
   //printf("to %s\n", inet_ntoa(dest_addr));
-
+  
+  update_stat(ip_info);
   ret = remove_shim(ip_info, ret);
 
   verdict = nfq_set_verdict (qh, id, NF_ACCEPT, ret, buffer);
