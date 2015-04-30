@@ -38,8 +38,8 @@ inline void assign_addr(struct in_addr* a, struct in_addr* b){
 
 inline int equal_addr(struct in_addr* a1, struct in_addr* a2)
 {
-  printf("Compare %s ", inet_ntoa(*a1));
-  printf("with %s\n", inet_ntoa(*a2));
+  //printf("Compare %s ", inet_ntoa(*a1));
+  //printf("with %s\n", inet_ntoa(*a2));
   return !memcmp(a1, a2, sizeof(struct in_addr));
 }
 
@@ -73,6 +73,14 @@ void get_my_addr(char* device, struct in_addr* addr){
   freeifaddrs(ifap);
 }
 
+inline int encrypt(int plain, int key){
+  return plain ^ key;
+}
+
+inline int decrypt(int cipher, int key){
+  return 0x12345678;
+  return cipher ^ key;
+}
 //============================Helper functions=======================
 
 
@@ -141,9 +149,10 @@ intercept(struct in_addr src_addr, struct in_addr dest_addr, struct iphdr* iph){
       uint16_t size = ntohs(udph->len);
       int msg_size = size - sizeof(struct udphdr);
 
-      memcpy(&intercept_rule_array[i].nonce, msg, sizeof(intercept_rule_array[i].nonce));
-      printf("Net filter intercepts a udp with nonce = %x\n", intercept_rule_array[i].nonce); 
-      fflush(stdout);
+      memcpy(&intercept_rule_array[i].nonce, msg, 
+	     sizeof(intercept_rule_array[i].nonce));
+      //printf("Net filter intercepts a udp with nonce = %x\n", 
+      //     intercept_rule_array[i].nonce); 
       pthread_kill(intercept_rule_array[i].requester, SIGALRM);
     }
   }
@@ -214,17 +223,15 @@ int add_filter_temp(struct flow* flow_pt)
   int filter_index = get_filter_rule_spot();
   if(filter_index == -1){
     printf("Fail to insert filter rule\n");
-    fflush(stdout);
     return 0;
   }
 
   filter_rule_expire[filter_index] = time(NULL) + T_TEMP;
   memcpy(&filter_rule_array[filter_index], flow_pt, sizeof(struct flow));
-  /*
-  print_addr("add_filter dest", filter_rule_array[filter_index].dest_addr);
-  print_addr("add_filter src", filter_rule_array[filter_index].src_addr);
-  */
+
   printf("Add filter rule %d\n",filter_index);
+  print_flow(flow_pt);
+  fflush(stdout);
   return 1;
 }
 
@@ -289,8 +296,6 @@ void *add_shim(struct iphdr* ip, int *size) {
   int shim_size = sizeof(Shim);
   unsigned short total_size = ntohs(ip->tot_len);
 
-  printf("%d %hu %d\n", iphdr_size, total_size, *size);
-
   if(total_size != *size){
     printf("The size doesn't match in add shim\n");
     return ip;
@@ -352,7 +357,6 @@ int forward_callback (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
   struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr (nfa);
   if (ph){
     id = ntohl (ph->packet_id);
-    //printf ("received packet with id %d\n", id);
   }
   
   ret = nfq_get_payload (nfa, &buffer);
@@ -362,8 +366,6 @@ int forward_callback (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
   dest_addr.s_addr = ip_info->daddr;
   src_addr.s_addr = ip_info->saddr;
 
-  printf("From %s", inet_ntoa(src_addr));
-  printf("to %s\n", inet_ntoa(dest_addr));
   intercept(src_addr, dest_addr, ip_info);
 
   struct flow flow;
@@ -375,12 +377,13 @@ int forward_callback (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
   int size = ret;
   buffer = add_shim(ip_info, &size);
 
-  printf("new size: %d\n", size);
   if(filter_out(&flow)){
     printf("packet dropped\n");
+    printf("From %s", inet_ntoa(src_addr));
+    printf("to %s\n", inet_ntoa(dest_addr));
     verdict = nfq_set_verdict (qh, id, NF_DROP, 0, NULL);
   }else{
-    printf("packet passed\n");
+    //printf("packet passed\n");
     verdict = nfq_set_verdict (qh, id, NF_ACCEPT, size, buffer);
   }
   
@@ -388,8 +391,6 @@ int forward_callback (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
     free(buffer);
   }
 
-  printf("\n");
-  fflush(stdout);
   return verdict;
 }
 
@@ -449,6 +450,142 @@ struct nfq_handle * set_up_forward_nfq()
 
 //============================End of FORWARD NFQ=======================
 
+//============================Start of Policy module=======================
+inline equal_record(struct record* r1, struct record* r2){
+  if(memcmp(r1, r2, sizeof(struct record)) == 0){
+    return 1;
+  }else{
+    return 0;
+  }
+}
+
+inline assign_record(struct record* r1, struct record* r2){
+  memcpy(r1, r2, sizeof(struct record));
+}
+void add_flow(Node* current, struct flow *flow, int flow_index){
+  int i;
+  struct record* next_record;
+  struct record temp_record;
+  current->counter ++;
+
+  if(flow_index == -1){
+    return;
+  }
+
+  if(flow_index > 0){
+    next_record = &flow->route_record[flow_index - 1];
+
+  }else{
+    temp_record.addr.s_addr = flow->src_addr.s_addr;
+    next_record = &temp_record;
+  }
+
+  int size = (current->children_size < NODE_CHILDREN_MAX)? 
+    current->children_size : NODE_CHILDREN_MAX;
+
+  for(i = 0; i < size; i++){
+    if(equal_record(&current->children[i]->record, next_record)){
+      add_flow(current->children[i], flow, flow_index - 1);
+      return;
+    }
+  }
+
+  if(current->children_size < NODE_CHILDREN_MAX){
+    Node* new_child = (Node*) malloc(sizeof(Node));
+    assign_record(&new_child->record, next_record);
+    new_child->counter = 0;
+    new_child->children_size = 0;
+    
+    current->children[current->children_size] = new_child;
+    current->children_size++;
+
+    add_flow(new_child, flow, flow_index - 1);
+
+    return;
+  }else{
+    current->children_size++;
+  }
+}
+
+void print_node(Node* node, int c){
+  int i,j;
+  printf("%d %d ",node->counter, node->children_size); 
+  printf("%x ", node->record.hash_value);
+  print_addr("", node->record.addr);
+
+  int size = (node->children_size < NODE_CHILDREN_MAX)? 
+    node->children_size : NODE_CHILDREN_MAX;
+
+  for(i=0; i < size; i++){
+    for(j=0; j < c; j++){
+      printf("\t");
+    }
+    print_node(node->children[i], c + 1);
+  }
+}
+
+int limit = 10;
+struct flow*  undesired_flow(Node* node, int root){
+  struct flow* flow;
+  int i;
+  if(node->counter > limit){
+    //source ip address; leaf of the tree.
+    if(node->children_size == 0){
+      flow = malloc(sizeof(struct flow));
+      flow->number = 0;
+
+      flow->src_addr.s_addr = node->record.addr.s_addr;
+      return flow;
+    }
+    //IP spoofing
+    if(node->children_size > NODE_CHILDREN_MAX){
+      flow = malloc(sizeof(struct flow));
+      flow->number = 0;
+
+      assign_record(&flow->route_record[flow->number], &node->record);
+      flow->number++;
+
+      memset(&flow->src_addr, 0, sizeof(struct in_addr));
+      return flow;
+
+    }else{
+      //Fint the children with the largest counter
+      Node* max_node = NULL;
+      int max = -1;
+      for(i = 0; i < node->children_size; i++){
+	if(node->children[i]->counter > max){
+	  max = node->children[i]->counter;
+	  max_node = node->children[i];
+	}
+      }
+      flow = undesired_flow(max_node, 0);
+      if(flow != NULL){
+	if(!root){
+	  assign_record(&flow->route_record[flow->number], &node->record);
+	  flow->number++;
+	}
+      }
+      return flow;
+    }
+  }else{
+    return NULL;
+  }
+}
+
+void free_node(Node* node){
+  int i;
+
+  int size = (node->children_size < NODE_CHILDREN_MAX)? 
+    node->children_size : NODE_CHILDREN_MAX;
+
+  for(i = 0; i < size; i++){
+    free_node(node->children[i]);
+  }
+  free(node);
+}
+//============================End of Policy module=======================
+
+
 //============================Start of IN NFQ=======================
 
 int remove_shim(struct iphdr* ip, int size) {
@@ -495,7 +632,6 @@ int in_callback (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
   struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr (nfa);
   if (ph){
     id = ntohl (ph->packet_id);
-    //printf ("received packet with id %d\n", id);
   }
   
   ret = nfq_get_payload (nfa, &buffer);
@@ -505,14 +641,10 @@ int in_callback (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
   dest_addr.s_addr = ip_info->daddr;
   src_addr.s_addr = ip_info->saddr;
 
-  printf("From %s", inet_ntoa(src_addr));
-  printf("to %s\n", inet_ntoa(dest_addr));
-
+  //printf("From %s", inet_ntoa(src_addr));
+  //printf("to %s\n", inet_ntoa(dest_addr));
 
   ret = remove_shim(ip_info, ret);
-
-  printf("new size: %d\n", ret);
-  fflush(stdout);
 
   verdict = nfq_set_verdict (qh, id, NF_ACCEPT, ret, buffer);
 
@@ -564,9 +696,6 @@ void run_nfq(struct nfq_handle *h){
   char buf[0xffff];
 
   while ((rv = recv(fd, (void*)buf, sizeof(buf), 0)) >= 0) {
-
-    printf("pkt received\n");
     nfq_handle_packet(h, buf, rv);
-
   }
 }

@@ -26,6 +26,29 @@ inline void print_flow(struct flow* flow);
 
 void get_my_addr(char* device, struct in_addr* addr);
 
+inline int encrypt(int plain, int key);
+
+inline int decrypt(int cipher, int key);
+
+#define NODE_CHILDREN_MAX 20
+
+struct node{
+  struct record record;
+  int children_size;
+  struct node* children[NODE_CHILDREN_MAX];
+  int counter;
+};
+
+typedef struct node Node;
+
+void add_flow(Node* current, struct flow *flow, int flow_index);
+
+void print_node(Node* node, int c);
+
+void free_node(Node* node);
+
+struct flow*  undesired_flow(Node* node, int root);
+
 
 /**
  * Get an index for intercept_rule_array where a intercept_rule can be put.
