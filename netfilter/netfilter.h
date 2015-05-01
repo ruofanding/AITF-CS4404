@@ -26,9 +26,8 @@ inline void print_flow(struct flow* flow);
 
 void get_my_addr(char* device, struct in_addr* addr);
 
-inline int encrypt(int plain, int key);
+inline int encrypt(struct in_addr addr, int key);
 
-inline int decrypt(int cipher, int key);
 
 
 
@@ -42,18 +41,15 @@ struct node{
 };
 
 typedef struct node Node;
-
-extern Node* stat_root;
-
-void add_flow(Node* current, struct flow *flow, int flow_index);
-
-void print_node(Node* node, int c);
-
-void free_node(Node* node);
-
-struct flow*  undesired_flow(Node* node, int root);
-
-void enable_statistic(double frequency);
+/** Call this function will enable statistic on the runner ends.
+ *
+ *@param interval_ms, interval for each refresh in milli seconds.
+ *@param limit, the limit for the maximum flow in t milli seconds.
+ *@param log_enable, indicate whether the function will enable log or not.
+ *@param cb, a callback function which takes a struct flow* as paramter
+ */
+void enable_statistic(int interval_ms, int limit, int log_enable, 
+		      void (*cb)(struct flow*));
 
 /**
  * Get an index for intercept_rule_array where a intercept_rule can be put.

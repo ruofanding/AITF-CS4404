@@ -107,7 +107,7 @@ void handle_victim_gw_request(int sockfd, struct flow* flow, int nonce1) {
     /* Check R value for Attacker GW (check RR shim) */
     for(i = 0; i < flow->number; i++){
       if(equal_addr(&flow->route_record[i].addr, &my_addr)){
-	if(decrypt(flow->route_record[i].hash_value, private_key) 
+	if(encrypt(flow->route_record[i].addr, private_key) 
 	   == flow->route_record[i].hash_value){
 	  RR_spoofing = 0;
 	}else{
@@ -118,10 +118,12 @@ void handle_victim_gw_request(int sockfd, struct flow* flow, int nonce1) {
     }  
     
     if(RR_spoofing == 0){
+      print_addr("Set up filter rule for victim:", flow->dest_addr);
       add_filter_temp(flow);
-
       /* Tell Attacker to stop sending traffic to flow */
       //notifyAttacker(flow->src_addr);
+    }else{
+      print_addr(":", flow->dest_addr);
     }
 
     respond[1] = RR_spoofing;

@@ -27,7 +27,7 @@ typedef struct{
   struct record route_record[6];
 }Shim;
 
-int statistic_enable = 0;
+int statistic_enabled = 0;
 
 //============================Helper functions=======================
 inline void print_addr(char *msg, struct in_addr a){
@@ -75,14 +75,10 @@ void get_my_addr(char* device, struct in_addr* addr){
   freeifaddrs(ifap);
 }
 
-inline int encrypt(int plain, int key){
-  return plain ^ key;
+inline int encrypt(struct in_addr addr, int key){
+  return addr.s_addr ^ key;
 }
 
-inline int decrypt(int cipher, int key){
-  return 0x12345678;
-  return cipher ^ key;
-}
 //============================Helper functions=======================
 
 
@@ -162,7 +158,7 @@ intercept(struct in_addr src_addr, struct in_addr dest_addr, struct iphdr* iph){
 //============================End of Intercept=======================
 
 
-//============================Start of Intercept=======================
+//============================Start of Filter=======================
 struct flow filter_rule_array[FILTER_RULE_SIZE];
 time_t filter_rule_expire[FILTER_RULE_SIZE];
 int filter_rule_used[FILTER_RULE_SIZE];
@@ -329,10 +325,12 @@ void *add_shim(struct iphdr* ip, int *size) {
     //Add route record
     assign_addr(&shim->route_record[shim->number].addr, &my_addr);
     shim->route_record[shim->number].hash_value = 
-      ip->daddr ^ private_key;
+      encrypt(shim->route_record[shim->number].addr, private_key);
+
     shim->number++;
     
     //Recalculate the checksum
+    ip->check = 0;
     nfq_ip_set_checksum(new_ip);
     return new_ip;
 
@@ -341,7 +339,7 @@ void *add_shim(struct iphdr* ip, int *size) {
     shim = (void*)ip + iphdr_size;
     assign_addr(&shim->route_record[shim->number].addr, &my_addr);
     shim->route_record[shim->number].hash_value = 
-      ip->daddr ^ private_key;
+      encrypt(shim->route_record[shim->number].addr, private_key);
     
     shim->number++;
     return ip;
@@ -400,9 +398,11 @@ struct nfq_handle * set_up_forward_nfq()
 {
   printf("===== setting up FORWARD nfq =====\n");
 
+  intercept_rule_number = 0;
   memset(intercept_rule_used, 0, sizeof(intercept_rule_used));
   pthread_mutex_init(&intercept_lock, NULL);
 
+  filter_rule_number = 0;
   memset(filter_rule_used, 0, sizeof(filter_rule_used));
   pthread_mutex_init(&filter_lock, NULL);
 
@@ -452,8 +452,13 @@ struct nfq_handle * set_up_forward_nfq()
 
 //============================End of FORWARD NFQ=======================
 
+
+
+
 //============================Start of Policy module=======================
 Node* stat_root;
+int refresh_stat = 1;
+FILE* log_file;
 
 inline equal_record(struct record* r1, struct record* r2){
   if(memcmp(r1, r2, sizeof(struct record)) == 0){
@@ -532,8 +537,38 @@ void print_node(Node* node, int c){
   }
 }
 
-int limit = 10;
-struct flow*  undesired_flow(Node* node, int root){
+void log_node(Node* node){
+  if(node == NULL || log_file == NULL){
+    return;
+  }
+  
+  //print leaves
+  if(node->children_size == 0){
+    fprintf(log_file, "%s, ", inet_ntoa(node->record.addr));
+    fprintf(log_file, "%d, ", node->counter);
+    return;
+
+  }else{
+    if(node->children_size == 2){
+      if(node->children[0]->record.addr.s_addr > node->children[1]->record.addr.s_addr){
+	log_node(node->children[0]);
+	log_node(node->children[1]);
+      }else{
+	log_node(node->children[1]);
+	log_node(node->children[0]);
+      }
+      return;
+    }
+    int size = (node->children_size < NODE_CHILDREN_MAX)? 
+      node->children_size : NODE_CHILDREN_MAX;
+    int i;
+    for(i=0; i < size; i++){   
+      log_node(node->children[i]);
+    }
+  }
+}
+
+struct flow*  undesired_flow(Node* node, int root, int limit){
   struct flow* flow;
   int i;
   if(node->counter > limit){
@@ -566,7 +601,7 @@ struct flow*  undesired_flow(Node* node, int root){
 	  max_node = node->children[i];
 	}
       }
-      flow = undesired_flow(max_node, 0);
+      flow = undesired_flow(max_node, 0, limit);
       if(flow != NULL){
 	if(!root){
 	  assign_record(&flow->route_record[flow->number], &node->record);
@@ -597,34 +632,89 @@ void free_node(Node* node){
   free(node);
 }
 
-int refresh_stat = 1;
+struct refresh_option{
+  void (*callback_function) (struct flow*);
+  int log_enable;
+  int interval_ms;
+  int limit;
+};
 
-void stat_refresh(int usec){
+void stat_refresh_handle(int s){
+  fflush(log_file);
+  fclose(log_file);
+  exit(1); 
+}
+
+void stat_refresh(struct refresh_option* option){
   struct flow* flow;
+  int usec = option->interval_ms * 1000;
+  int log_enable = option->log_enable;
+  int limit = option->limit;
+  void (*callback_function) (struct flow*);
+  callback_function = option->callback_function;
+  free(option);
+
+  
+  if(log_enable){
+    log_file = fopen("log.csv", "w");
+
+    if(log_file == NULL){
+      printf("Error open file log.csv");
+    }else{
+      fprintf(log_file, "Interval %d ms\n", usec / 1000);
+
+      struct sigaction sigIntHandler;
+      
+      sigIntHandler.sa_handler = stat_refresh_handle;
+      sigemptyset(&sigIntHandler.sa_mask);
+      sigIntHandler.sa_flags = 0;
+
+      sigaction(SIGINT, &sigIntHandler, NULL);
+    }
+
+  }else{
+    log_file = NULL;
+  }
+  flow = NULL;
   while(1){
     if(refresh_stat == 0){
-      flow = undesired_flow(stat_root, 1);
+      //flow = undesired_flow(stat_root, 1, limit);
       if(flow != NULL){
+	printf("Detect undesired flow!:");
 	print_flow(flow);
+	callback_function(flow);
+	free(flow);
+      }
+      if(log_file != NULL){
+	log_node(stat_root);
+	fprintf(log_file, "\n");
       }
       refresh_stat = 1;
     }
     usleep(usec);
   }
 }
-void enable_statistic(double frequency)
-{
+
+void enable_statistic(int interval_ms, int limit, int log_enable, 
+		      void (*cb)(struct flow*)){
+  struct refresh_option* option = malloc(sizeof(struct refresh_option));
+
+  option->interval_ms = interval_ms;
+  option->log_enable = log_enable;
+  option->limit = limit;
+  option->callback_function = cb;
+
   stat_root = NULL;
+
   pthread_t pid;
-  int usec = frequency * 1000000;
-  pthread_create(&pid, NULL, stat_refresh, (void*)usec);
-  statistic_enable = 1;
+  pthread_create(&pid, NULL, stat_refresh, option);
+  statistic_enabled = 1;
 }
 
 
 void update_stat(struct iphdr* ip)
 {
-  if(statistic_enable && ip->protocol == AITF_PROTOCOL_NUM){
+  if(statistic_enabled && ip->protocol == AITF_PROTOCOL_NUM){
     if(stat_root != NULL && refresh_stat == 1){
       free_node(stat_root);
       stat_root = NULL;
@@ -651,6 +741,7 @@ void update_stat(struct iphdr* ip)
   }
 }
 //============================End of Policy module=======================
+
 
 
 //============================Start of IN NFQ=======================
@@ -681,6 +772,7 @@ int remove_shim(struct iphdr* ip, int size) {
     memcpy((void*)ip + iphdr_size, buffer, sizeof(buffer));
 
     //Recalculate the checksum
+    ip->check = 0;
     nfq_ip_set_checksum(ip);
 
 
