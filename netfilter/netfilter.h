@@ -77,7 +77,6 @@ void free_intercept_rule_spot(int index);
  */
 int add_filter(struct flow* flow);
 
-void add_threshold(int limit);
 
 
 /**
