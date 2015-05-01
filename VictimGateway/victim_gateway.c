@@ -16,6 +16,11 @@
 
 struct in_addr my_addr;
 
+struct flow flow_request_history[100];
+struct in_addr gw_request_history[100];
+int request_time[100];
+int history_number = 0;
+
 int intercept_udp_packet(struct in_addr src_addr, struct in_addr dest_addr){
   int result;
   int intercept_rule_index;
@@ -146,9 +151,24 @@ void* handle_victim_request(void* data){
   }else{
     printf("Reqeust from: %s\n", inet_ntoa(flow.dest_addr));
   }
-
+  
+  
   //Contact with upstream gateways.
   int i;
+  int counter = 0;
+  for(i = 0; i < history_number; i++){
+    if(memcmp(&flow, &flow_request_history[i], sizeof(struct flow)) == 0
+       && request_time[i] == 2){
+      print_addr("The gateway has lied twice", gw_request_history[i]);
+      shift_flow(&flow);
+      flow.src_addr.s_addr = 0x0;
+      printf("New flow\n");
+      print_flow(&flow);
+      break;
+    }
+  }
+
+
   int result;
   int success = 0;
   struct flow flow_send;
@@ -185,6 +205,23 @@ void* handle_victim_request(void* data){
     if(result == 0){
       print_addr("Success to:", flow.route_record[i].addr);
 
+      int j;
+      for(j = 0; j < history_number; j++){
+	if(memcmp(&flow, &flow_request_history[j], sizeof(struct flow)) == 0
+	   && equal_addr(&flow.route_record[i].addr, &gw_request_history[j])){
+	  request_time[i]++;
+	  break;
+	}
+      }
+      //create a new one.
+      if(j == history_number){
+	memcpy(&flow_request_history[history_number], &flow, 
+	       sizeof(struct flow));
+	assign_addr(&gw_request_history[history_number], 
+		    &flow.route_record[i].addr);
+	request_time[history_number] = 1;
+	history_number++;
+      }
       break;
     }else if(result == 1){ //RR shim is not correct
       print_addr("Fail to:", flow.route_record[i].addr);

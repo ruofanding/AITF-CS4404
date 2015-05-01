@@ -86,7 +86,7 @@ void *acceptGatewayRequest(void *arg) {
   handle_victim_gw_request(sockfd, &flow, nonce1);
   pthread_exit(NULL);
 }
-
+int malicious = 0;
 /* Send TCP Message to Victim GW with nonce2 */
 void handle_victim_gw_request(int sockfd, struct flow* flow, int nonce1) {
   int i, RR_spoofing;
@@ -119,7 +119,11 @@ void handle_victim_gw_request(int sockfd, struct flow* flow, int nonce1) {
     
     if(RR_spoofing == 0){
       print_addr("Set up filter rule for victim:", flow->dest_addr);
-      add_filter(flow);
+      if(!malicious){
+	add_filter(flow);
+      }else{
+	printf("I am malicious. I didn't set it up\n");
+      }
       /* Tell Attacker to stop sending traffic to flow */
       //notifyAttacker(flow->src_addr);
     }else{
@@ -236,11 +240,14 @@ void set_up_listen(int AITF_on)
 }
 
 int main(int argc, char **argv) {
-  if(argc != 2){
-    printf("Usage: 0 AITF off, otherwise AITF on.\n");
+  if(argc != 3){
+    printf("Usage: 0 AITF off, otherwise AITF on,\n");
+    printf("       0 malicious off, otherwise malicious on.\n");
+
     exit(1);
   }
 
+  malicious = atoi(argv[2]);
   pthread_t pid;
   struct nfq_handle* h;
    
