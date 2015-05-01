@@ -156,14 +156,18 @@ void* handle_victim_request(void* data){
   //Contact with upstream gateways.
   int i;
   int counter = 0;
+  int skip_first;
+  //checking lying gateway
   for(i = 0; i < history_number; i++){
     if(memcmp(&flow, &flow_request_history[i], sizeof(struct flow)) == 0
        && request_time[i] == 2){
       print_addr("The gateway has lied twice", gw_request_history[i]);
-      shift_flow(&flow);
+      //shift_flow(&flow);
+      skip_first = 1;
+      /*
       flow.src_addr.s_addr = 0x0;
       printf("New flow\n");
-      print_flow(&flow);
+      print_flow(&flow);*/
       break;
     }
   }
@@ -174,6 +178,10 @@ void* handle_victim_request(void* data){
   struct flow flow_send;
 
   for(i = 0; i < flow.number; i++){
+    if(skip_first){
+      skip_first = 0;
+      continue;
+    }
     memset(&flow_send, 0 , sizeof(struct flow));
     assign_addr(&flow_send.dest_addr, &flow.dest_addr);
     assign_addr(&flow_send.src_addr, &flow.src_addr);

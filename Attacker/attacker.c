@@ -49,6 +49,6 @@ int main(int argc, char *argv[])
     printf("Invalid input\n");
     return -1;
   }
-  normal_attack("10.4.18.1", *argv[1]);
+  normal_attack("10.4.18.1", atoi(argv[1]));
   return 0;
 }
