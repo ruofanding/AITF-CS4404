@@ -68,7 +68,7 @@ void free_intercept_rule_spot(int index);
 #define FILTER_RULE_SIZE 1000
 #define SHADOW_TABLE_SIZE 1000
 
-#define T_TEMP 2
+#define T_TEMP 200
 #define T_LONG 600
 /** 
  * Filter out the flow.

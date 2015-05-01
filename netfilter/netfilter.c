@@ -224,8 +224,13 @@ void clean_table()
 	if( current >= filter_rule_expire[i] ){
 	  printf("Filter rule %d expire\n", i);
 	  print_flow(&filter_rule_array[i]);
+
+	  move_to_shadow_table(&filter_rule_array[i]);
+
+
 	  fflush(stdout);
 	  free_filter_rule_spot(i);
+
 	}
       }
     }
@@ -272,30 +277,41 @@ int add_filter(struct flow* flow_pt)
 int match_flow(struct flow* rule, struct flow* flow){
   int i;
 
-  if(!equal_addr(&rule->dest_addr, &flow->dest_addr)){
-    return 0;
-  }
+  if(rule->number == 1){
 
-  /*
-  if(rule->number > flow->number){
+    if(!equal_addr(&rule->dest_addr, &flow->dest_addr)){
+      return 0;
+    }
+
+    if(flow->src_addr.s_addr ^ 0){ 
+      if(!equal_addr(&rule->src_addr, &flow->src_addr)){
+	return 0;
+      }
+    }
+    return 1;
+
+  }else if(rule->number == 2){
+
+    if(flow->number < 1){
+      return 0;
+    }
+
+    if(equal_addr(&flow->route_record[flow->number - 1].addr,
+		  &rule->route_record[0].addr)){
+      return 1;
+    
+    }else{
+    
+      return 0;
+    
+    }
+  }else{
+    printf("Shouldn't happen\n");
+    fflush(stdout);
     return 0;
+
   }
-  
-  for(i = 0; i < rule->number; i++){
-    if(!equal_addr(&(rule->route_record[i].addr), &(flow->route_record[i].addr))){
-      return 0;
-    }
-    }*/
-  
-  // src_addr will be compared only if source address is set not 0.0.0.0
-  if(flow->src_addr.s_addr ^ 0){ 
-    if(!equal_addr(&rule->src_addr, &flow->src_addr)){
-      return 0;
-    }
-  }
-  return 1;
 }
-
 /**
  *@param flow the flow need to be checked by all filter rules
  *@return result 0: pass, 1:drop
@@ -409,9 +425,15 @@ int forward_callback (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
   flow.dest_addr.s_addr = dest_addr.s_addr;
   flow.number = 0;
   
+  if(ip_info->protocol == AITF_PROTOCOL_NUM){
+    Shim* shim = (void*)ip_info + sizeof(struct iphdr);
+    flow.number = shim->number;
+    memcpy(&flow.route_record, &shim->route_record, sizeof(flow.route_record));
+  }
   
   int size = ret;
   buffer = add_shim(ip_info, &size);
+
 
   if(filter_out(&flow)){
     printf("packet dropped\n");
@@ -628,7 +650,7 @@ struct flow*  undesired_flow(Node* node, int root, int limit){
       return flow;
 
     }else{
-      //Fint the children with the largest counter
+      //Find the children with the largest counter
       Node* max_node = NULL;
       int max = -1;
       for(i = 0; i < node->children_size; i++){
@@ -711,15 +733,50 @@ void stat_refresh(struct refresh_option* option){
   }else{
     log_file = NULL;
   }
+
   flow = NULL;
+  int l = 0;
+  int r = 0;
+
+  struct in_addr attack_array[10000];
+  int counter_refresh[10000];
+
+  int i;
+  int skip;
+
+  int c = 1000000 / usec;
+
   while(1){
+    //refresh attack_array
+    for(i = l; i < r; i++){
+      counter_refresh[i] --;
+      if(counter_refresh[i] == 0){
+	l++;
+	break;
+      } 
+    }
+
     if(refresh_stat == 0){
-      //flow = undesired_flow(stat_root, 1, limit);
+      flow = undesired_flow(stat_root, 1, limit);
+
       if(flow != NULL){
-	printf("Detect undesired flow!:");
-	print_flow(flow);
-	callback_function(flow);
-	free(flow);
+	skip = 0;
+	for(i = l; i < r; i++){
+	  if(flow->src_addr.s_addr == attack_array[i].s_addr){
+	    skip = 1;
+	    break;
+	  }
+	}
+	if(!skip){
+	  printf("Detect undesired flow!:");
+	  print_flow(flow);
+	  pthread_t pid;
+	  pthread_create(&pid, NULL, callback_function, flow);
+
+	  attack_array[r].s_addr = flow->src_addr.s_addr;
+	  counter_refresh[r++] = c;
+	  //free(flow);
+	}
       }
       if(log_file != NULL){
 	log_node(stat_root);

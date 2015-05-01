@@ -50,8 +50,8 @@ void send_filter_request_to_gw(struct flow *flow){
 int main ( int argc, char *argv[] )
 {
   if(argc == 2){
-    int ms = 50;
-    int limit = 5;
+    int ms = 25;
+    int limit = 50;
     enable_statistic(ms, limit, 1, send_filter_request_to_gw);
     
     printf("Statistic enable\n");
