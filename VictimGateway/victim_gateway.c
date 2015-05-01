@@ -159,15 +159,18 @@ void* handle_victim_request(void* data){
     assign_addr(&flow_send.src_addr, &flow.src_addr);
 
     if(i > 0){
-      assign_addr(&flow_send.route_record[0].addr, 
-		  &flow.route_record[i-1].addr);
-      assign_addr(&flow_send.route_record[1].addr, 
-		  &flow.route_record[i].addr);
+      memcpy(&flow_send.route_record[0], 
+	     &flow.route_record[i-1],
+	     sizeof(struct record));
+      memcpy(&flow_send.route_record[1], 
+	     &flow.route_record[i],
+	     sizeof(struct record));
 
       flow_send.number = 2;
     }else{
-      assign_addr(&flow_send.route_record[0].addr, 
-		  &flow.route_record[i].addr);
+      memcpy(&flow_send.route_record[0], 
+	     &flow.route_record[i].addr,
+	     sizeof(struct record));
       flow_send.number = 1;
     }
 

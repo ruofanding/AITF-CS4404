@@ -51,7 +51,7 @@ int main ( int argc, char *argv[] )
 {
   if(argc == 2){
     int ms = 25;
-    int limit = 50;
+    int limit = 25;
     enable_statistic(ms, limit, 1, send_filter_request_to_gw);
     
     printf("Statistic enable\n");
@@ -60,7 +60,6 @@ int main ( int argc, char *argv[] )
   get_my_addr("eth0", &my_addr);
   print_addr("My ip", my_addr);
 
-  add_threshold(4);
   struct nfq_handle* h = set_up_in_nfq();
 
   run_nfq(h);
