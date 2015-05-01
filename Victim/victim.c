@@ -60,6 +60,7 @@ int main ( int argc, char *argv[] )
   get_my_addr("eth0", &my_addr);
   print_addr("My ip", my_addr);
 
+  add_threshold(4);
   struct nfq_handle* h = set_up_in_nfq();
 
   run_nfq(h);

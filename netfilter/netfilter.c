@@ -878,7 +878,30 @@ int remove_shim(struct iphdr* ip, int size) {
   }
 }
 
-int counter = 1;
+
+
+int counter = 0;
+int reset_counter = 0;
+int threshold_enabled = 0;
+int threshold_limit;
+void refresh_threshold()
+{
+  while(1){
+    usleep(20000);
+    //    printf("%d", counter);
+    reset_counter = 1;
+  }
+}
+
+void add_threshold(int limit)
+{
+  threshold_limit = limit;
+  threshold_enabled = 1;
+  pthread_t pid;
+  pthread_create(&pid, NULL, refresh_threshold, NULL);
+}
+
+
 int in_callback (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
 		 struct nfq_data *nfa, void *data)
 {
@@ -904,7 +927,20 @@ int in_callback (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
   update_stat(ip_info);
   ret = remove_shim(ip_info, ret);
 
-  verdict = nfq_set_verdict (qh, id, NF_ACCEPT, ret, buffer);
+  if(threshold_enabled){
+    if(reset_counter){
+      counter = 0;
+      reset_counter = 0;
+    }
+    if(counter < threshold_limit){//below threshold_limit, accpt
+      verdict = nfq_set_verdict (qh, id, NF_ACCEPT, ret, buffer);
+      counter++;
+    }else{//above threshold_limit, drop
+      verdict = nfq_set_verdict (qh, id, NF_DROP, 0, NULL);
+    }
+  }else{
+    verdict = nfq_set_verdict (qh, id, NF_ACCEPT, ret, buffer);
+  }
 
   return verdict;
 }
