@@ -76,6 +76,7 @@ int send_filter_request(struct flow* flow_pt, struct in_addr upstream_gateway){
   size = write(sock_fd, flow_pt, sizeof(struct flow));
   if(size != sizeof(struct flow)){
     printf("Write fail!\n");
+    return -1;
   }
 
   //Intercetp nonce1
@@ -143,27 +144,37 @@ void* handle_victim_request(void* data){
     close(sockfd);
     return;
   }else{
-    printf("Reqeust from: %s\n", inet_ntoa(flow.src_addr));
+    printf("Reqeust from: %s\n", inet_ntoa(flow.dest_addr));
   }
 
   //Contact with upstream gateways.
-  int i, flow_number;
+  int i;
   int result;
   int success = 0;
   struct flow flow_send;
 
-  memset(&flow_send, 0 , sizeof(struct flow));
-  assign_addr(&flow_send.dest_addr, &flow.dest_addr);
-  assign_addr(&flow_send.src_addr, &flow.src_addr);
-  flow_send.number = 0;
+  for(i = 0; i < flow.number; i++){
+    memset(&flow_send, 0 , sizeof(struct flow));
+    assign_addr(&flow_send.dest_addr, &flow.dest_addr);
+    assign_addr(&flow_send.src_addr, &flow.src_addr);
 
-  flow_number = flow.number;
-  for(i = 0; i < flow_number - 1; i++){
-    assign_addr(&flow_send.route_record[flow_send.number].addr, 
-		&flow.route_record[i].addr);
-    flow_send.route_record[flow_send.number].hash_value = 
-      flow.route_record[i].hash_value;
-    flow_send.number++;
+    if(i > 0){
+      assign_addr(&flow_send.route_record[0].addr, 
+		  &flow.route_record[i-1].addr);
+      assign_addr(&flow_send.route_record[1].addr, 
+		  &flow.route_record[i].addr);
+
+      flow_send.number = 2;
+    }else{
+      assign_addr(&flow_send.route_record[0].addr, 
+		  &flow.route_record[i].addr);
+      flow_send.number = 1;
+    }
+
+    if(i == flow.number - 1){
+      add_filter(&flow_send); //Install filter rule locally    
+      break;
+    }
 
     print_addr("send filter request to:", flow.route_record[i].addr);
     result = send_filter_request(&flow_send, 
@@ -171,17 +182,10 @@ void* handle_victim_request(void* data){
     if(result == 0){
       print_addr("Success to:", flow.route_record[i].addr);
 
-      success = 1;
       break;
     }else if(result == 1){ //RR shim is not correct
       print_addr("Fail to:", flow.route_record[i].addr);
-
-      flow_send.number--;
     }
-  }
-
-  if(!success){ //Fail to install filter rule remotely
-    add_filter(&flow, T_TEMP); //Install filter rule locally
   }
 
   msg = "OK";
@@ -254,15 +258,13 @@ void listen_victim(){
     }else{
       printf("---------connect to a new victim-------------\n");
 
-      printf("%s\n", inet_ntoa((struct in_addr)victim_addr.sin_addr));
-
       HandlerData* data = malloc(sizeof(HandlerData));
       data->sockfd = newsockfd;
       memcpy(&data->victim_addr, &victim_addr.sin_addr, sizeof(struct in_addr));
       pthread_t pid;
       pthread_create(&pid, NULL, handle_victim_request, data);  
-      printf("One requester, %li\n", (unsigned long int) pid);
-      fflush(stdout);
+      //printf("One requester, %li\n", (unsigned long int) pid);
+      //fflush(stdout);
     }
   }  
 }
