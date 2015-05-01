@@ -65,7 +65,7 @@ void *acceptGatewayRequest(void *arg) {
   pthread_t p2;
   int sockfd = *((int *)arg);
   free(arg);
-  int nonce1 = 0xFFFF;
+  int nonce1 = rand();
   struct flow flow;
   bzero(&flow, 60);
   
