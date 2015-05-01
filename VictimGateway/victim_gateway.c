@@ -325,6 +325,9 @@ int main ( int argc, char *argv[] )
   pthread_t pid;
   struct nfq_handle* h;
   
+  struct in_addr v6;
+  inet_aton("10.4.18.6", &v6);
+  add_legacy_host(v6);
   
   h= set_up_forward_nfq();
   pthread_create(&pid, NULL, (void*) run_nfq, h);

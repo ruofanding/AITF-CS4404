@@ -80,6 +80,14 @@ inline int encrypt(struct in_addr addr, int key){
 
 //============================Helper functions=======================
 
+struct in_addr legacy_hosts[1000];
+int legacy_host_number = 0;
+
+void add_legacy_host(struct in_addr addr)
+{
+  legacy_hosts[legacy_host_number].s_addr = addr.s_addr;
+  legacy_host_number++;
+}
 
 //============================Start of Intercept=======================
 InterceptRule intercept_rule_array[INTERCEPT_RULE_SIZE];
@@ -434,6 +442,12 @@ int forward_callback (struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
   int size = ret;
   buffer = add_shim(ip_info, &size);
 
+  int i;
+  for(i = 0; i < legacy_host_number; i++){
+    if(equal_addr(&dest_addr, &legacy_hosts[i])){
+      size = remove_shim(buffer, size);
+    }
+  }
 
   if(filter_out(&flow)){
     printf("packet dropped\n");

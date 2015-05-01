@@ -78,6 +78,11 @@ void free_intercept_rule_spot(int index);
 int add_filter(struct flow* flow);
 
 
+/**
+ *Register legacy host
+ */
+void add_legacy_host(struct in_addr addr);
+
 
 /**
  * Set up the netfilter FORWARD queue. The setup includes open, bind, set_mode
