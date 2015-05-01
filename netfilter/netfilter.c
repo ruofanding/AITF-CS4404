@@ -17,7 +17,6 @@
 
 #define FORWARD_NFQUEUE_NUM 0
 #define IN_NFQUEUE_NUM 1
-#define T_TEMP 1000
 
 
 #define AITF_PROTOCOL_NUM 253
@@ -163,6 +162,12 @@ struct flow filter_rule_array[FILTER_RULE_SIZE];
 time_t filter_rule_expire[FILTER_RULE_SIZE];
 int filter_rule_used[FILTER_RULE_SIZE];
 int filter_rule_number = 0;
+
+struct flow shadow_table[SHADOW_TABLE_SIZE];
+time_t shadow_table_expire[SHADOW_TABLE_SIZE];
+int shadow_table_number = 0;
+
+
 pthread_mutex_t filter_lock;
 
 int get_filter_rule_spot()
@@ -190,7 +195,19 @@ void free_filter_rule_spot(int index)
   pthread_mutex_unlock(&filter_lock);
 }
 
-void clean_filter_rule()
+void move_to_shadow_table(struct flow *flow)
+{
+  printf("Move to shadow table:\n");
+  print_flow(flow);
+  memcpy(&shadow_table[shadow_table_number], flow, sizeof(struct flow));
+  shadow_table_expire[shadow_table_number] = time(NULL) + T_LONG;
+  shadow_table_number++;
+}
+
+
+/**Clean both filter rule array and shadow table.
+ */
+void clean_table()
 {
   time_t current;
   int i, counter;
@@ -212,11 +229,23 @@ void clean_filter_rule()
 	}
       }
     }
+
+    //clean shadow table
+    int size = shadow_table_number;
+    for(i = 0; i < size; i++){
+      if(current >= shadow_table_expire[i] ){
+	printf("Shadow flow %d expire\n", i);
+	print_flow(&shadow_table[i]);
+	fflush(stdout);
+	size--;
+      }
+    }
+
     sleep(1);
   }
 }
 
-int add_filter_temp(struct flow* flow_pt)
+int add_filter(struct flow* flow_pt)
 {
   int filter_index = get_filter_rule_spot();
   if(filter_index == -1){
@@ -224,16 +253,23 @@ int add_filter_temp(struct flow* flow_pt)
     return 0;
   }
 
-  filter_rule_expire[filter_index] = time(NULL) + T_TEMP;
+  int i, length = T_TEMP;
+  for(i = 0; i < shadow_table_number; i++){
+    if(match_flow(&shadow_table[i], flow_pt)){
+      length = T_LONG;
+    } 
+  }
+
+  filter_rule_expire[filter_index] = time(NULL) + length;
   memcpy(&filter_rule_array[filter_index], flow_pt, sizeof(struct flow));
 
-  printf("Add filter rule %d\n",filter_index);
+  printf("Add filter rule %d for %d\n",filter_index, length);
   print_flow(flow_pt);
   fflush(stdout);
   return 1;
 }
 
-int match_filter_rule(struct flow* rule, struct flow* flow){
+int match_flow(struct flow* rule, struct flow* flow){
   int i;
 
   if(!equal_addr(&rule->dest_addr, &flow->dest_addr)){
@@ -272,7 +308,7 @@ int filter_out(struct flow* flow_pt)
   for(i = 0, counter = 0; i < filter_rule_number; i++){
     if(filter_rule_used[i]){
       counter ++;
-      if(match_filter_rule(&filter_rule_array[i], flow_pt)){
+      if(match_flow(&filter_rule_array[i], flow_pt)){
 	return 1;
       }
     }
@@ -413,7 +449,7 @@ struct nfq_handle * set_up_forward_nfq()
 
   //Run filter clean thread
   pthread_t pid;
-  pthread_create(&pid, NULL, clean_filter_rule, NULL);
+  pthread_create(&pid, NULL, clean_table, NULL);
 
   struct nfq_handle * h = nfq_open();
   if (!h) {

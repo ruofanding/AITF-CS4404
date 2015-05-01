@@ -69,10 +69,14 @@ int send_filter_request(struct flow* flow_pt, struct in_addr upstream_gateway){
 
   if (connect(sock_fd, (struct sockaddr *) &attacker_gw_addr, 
 	      sizeof(attacker_gw_addr)) < 0)  {
-    printf("socket connection fail");
+    printf("socket connection fail\n");
     return -1;
   }
-  write(sock_fd, flow_pt, sizeof(struct flow));
+  int size;
+  size = write(sock_fd, flow_pt, sizeof(struct flow));
+  if(size != sizeof(struct flow)){
+    printf("Write fail!\n");
+  }
 
   //Intercetp nonce1
   int nonce1 = intercept_udp_packet(attacker_gw_addr.sin_addr, flow_pt->dest_addr);
@@ -177,7 +181,7 @@ void* handle_victim_request(void* data){
   }
 
   if(!success){ //Fail to install filter rule remotely
-    add_filter_temp(&flow); //Install filter rule locally
+    add_filter(&flow, T_TEMP); //Install filter rule locally
   }
 
   msg = "OK";

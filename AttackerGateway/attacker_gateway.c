@@ -169,7 +169,7 @@ void notifyAttacker(struct in_addr raw_h_addr) {
 /**
  * Setup to accept TCP connection
  */
-void set_up_listen()
+void set_up_listen(int AITF_on)
 {
   int i = 0;
   int sock, connected, true = 1;
@@ -205,15 +205,21 @@ void set_up_listen()
   
   printf("Listening on Port 50000\n");
   fflush(stdout);
-  
+
+  pthread_t p1;
+  int *arg; 
   while (1) {
-    pthread_t p1;
     /* Create thread */
-    int *arg = malloc(sizeof(int));
+    arg = malloc(sizeof(int));
     
     /* Accept Connection */
     connected = accept(sock, (struct sockaddr*) &client_addr, &sin_size);
     *arg = connected;
+
+    if(!AITF_on){
+      close(connected);
+      continue;
+    }
     
     if (connected < 0) {
       printf("Error: Accept\n");
@@ -230,6 +236,11 @@ void set_up_listen()
 }
 
 int main(int argc, char **argv) {
+  if(argc != 2){
+    printf("Usage: 0 AITF off, otherwise AITF on.\n");
+    exit(1);
+  }
+
   pthread_t pid;
   struct nfq_handle* h;
    
@@ -240,6 +251,6 @@ int main(int argc, char **argv) {
   h = set_up_in_nfq();
   pthread_create(&pid, NULL, (void*) run_nfq, h);
 
-  set_up_listen();  
+  set_up_listen(atoi(argv[1]));  
   return 0;
 }

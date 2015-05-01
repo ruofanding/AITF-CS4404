@@ -66,20 +66,17 @@ void free_intercept_rule_spot(int index);
 
 
 #define FILTER_RULE_SIZE 1000
+#define SHADOW_TABLE_SIZE 1000
 
+#define T_TEMP 2
+#define T_LONG 600
 /** 
- * Filter out the flow for Ttmp.
+ * Filter out the flow.
  * @param flow a pointer to a flow which should be filter out
  * @return result 0 for failing to add the filter rule
  */
-int add_filter_temp(struct flow* flow);
+int add_filter(struct flow* flow);
 
-/** 
- * Filter out the flow for Tlong.
- * @param flow a pointer to a flow which should be filter out
- * @return result 0 for failing to add the filter rule
- */
-int add_filter_long(struct flow* flow);
 
 
 /**
