@@ -119,7 +119,7 @@ void handle_victim_gw_request(int sockfd, struct flow* flow, int nonce1) {
     
     if(RR_spoofing == 0){
       print_addr("Set up filter rule for victim:", flow->dest_addr);
-      add_filter_temp(flow);
+      add_filter(flow);
       /* Tell Attacker to stop sending traffic to flow */
       //notifyAttacker(flow->src_addr);
     }else{
