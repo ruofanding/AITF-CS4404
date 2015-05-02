@@ -1,7 +1,0 @@
-sudo apt-get install libnetfilter-queue-dev
-sudo apt-get install make
-
-ip route add 10.4.18.0/24 via 10.44.18.2 #replaced by gateway's IP address
-sysctl -w net.ipv4.conf.eth0.accept_redirects=0
-sysctl -w net.ipv6.conf.eth0.accept_redirects=0
-

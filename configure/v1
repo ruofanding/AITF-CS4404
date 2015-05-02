@@ -1,0 +1,3 @@
+ip route flush cache
+ip route add 10.4.18.0/24 via 10.10.128.150
+ip route add 10.10.128.122 via 10.10.128.150
